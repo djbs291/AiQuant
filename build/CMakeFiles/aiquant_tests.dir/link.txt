@@ -1,1 +1,0 @@
-/usr/bin/g++ -g CMakeFiles/aiquant_tests.dir/tests/basic_test.cpp.o CMakeFiles/aiquant_tests.dir/tests/core/test_price.cpp.o CMakeFiles/aiquant_tests.dir/tests/core/test_tick.cpp.o CMakeFiles/aiquant_tests.dir/tests/core/test_volume.cpp.o -o aiquant_tests  /usr/lib/libCatch2WithMain.a 

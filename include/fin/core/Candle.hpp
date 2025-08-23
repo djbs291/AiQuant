@@ -2,12 +2,10 @@
 #ifndef FIN_CORE_CANDLE_HPP
 #define FIN_CORE_CANDLE_HPP
 
-#ifndef FIN_CORE_CANDLE_HPP
-#define FIN_CORE_CANDLE_HPP
-
 #include "Timestamp.hpp"
 #include "Price.hpp"
 #include "Volume.hpp"
+#include <string>
 
 namespace fin::core
 {
@@ -16,10 +14,10 @@ namespace fin::core
         Candle(Timestamp start, Price open, Price high, Price low, Price close, Volume vol);
 
         Timestamp start_time() const;
-        Timestamp open() const;
-        Timestamp high() const;
-        Timestamp low() const;
-        Timestamp close() const;
+        Price open() const;
+        Price high() const;
+        Price low() const;
+        Price close() const;
         Volume volume() const;
 
     private:
