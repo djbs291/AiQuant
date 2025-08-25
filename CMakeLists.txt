@@ -38,9 +38,15 @@ add_library(fin_core STATIC ${CORE_SRC})
 target_include_directories(fin_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(fin_core PUBLIC cxx_std_20)
 
+# ============ Indicators Library ============
+file(GLOB_RECURSE IND_SRC "src/fin/indicators/*.cpp")
+add_library(fin_indicators STATIC ${IND_SRC})
+target_include_directories(fin_indicators PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(fin_indicators PUBLIC cxx_std_20)
+
 # ============ Main Executable ============
 add_executable(aiquant src/main.cpp)
-target_link_libraries(aiquant PRIVATE fin_core)
+target_link_libraries(aiquant PRIVATE fin_core fin_indicators)
 target_compile_features(aiquant PRIVATE cxx_std_20)
 
 # ============ Testing ============
@@ -72,10 +78,10 @@ file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp" "tests/*.cc" "tests/*.cxx")
 if(Catch2_FOUND AND TEST_SOURCES)
     add_executable(aiquant_tests ${TEST_SOURCES})
     if(TARGET Catch2::Catch2WithMain)
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators)
         message(STATUS "Using Catch2 v3")
     else()
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators)
         message(STATUS "Using Catch2 v2")
     endif()
     target_include_directories(aiquant_tests
