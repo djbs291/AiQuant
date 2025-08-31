@@ -1,6 +1,7 @@
 #pragma once
 #ifndef FIN_CORE_SYMBOL_HPP
 #define FIN_CORE_SYMBOL_HPP
+
 #include <string>
 namespace fin::core
 {

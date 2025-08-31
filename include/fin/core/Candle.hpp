@@ -11,6 +11,7 @@ namespace fin::core
 {
     class Candle
     {
+    public:
         Candle(Timestamp start, Price open, Price high, Price low, Price close, Volume vol);
 
         Timestamp start_time() const;
