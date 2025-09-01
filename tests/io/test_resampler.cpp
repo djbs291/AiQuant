@@ -1,89 +1,173 @@
 #include <catch2/catch.hpp>
-
-#include "fin/io/Resampler.hpp"
-#include "fin/core/Tick.hpp"
-#include "fin/core/Candle.hpp"
-#include "fin/core/Timestamp.hpp"
-#include "fin/core/Symbol.hpp"
-#include "fin/core/Price.hpp"
-#include "fin/core/Volume.hpp"
-
+#include <vector>
 #include <chrono>
 
-using namespace fin::io;
-using namespace fin::core;
-using namespace std::chrono;
+// IO under test
+#include "fin/io/Resampler.hpp"
 
-static inline Timestamp ms(long long v)
+// Core types (adjust includes to your layout)
+#include "fin/core/Tick.hpp"
+#include "fin/core/Candle.hpp"
+
+using namespace fin;
+
+// --- Small helpers (adapt here if your core types differ) ---
+static core::Timestamp mk_ts_ms(long long ms)
 {
-    // Your Timestamp is nanoseconds-based; constructing from milliseconds is OK.
-    return Timestamp{milliseconds{v}};
+    using namespace std::chrono;
+    return core::Timestamp(time_point<std::chrono::system_clock, nanoseconds>(nanoseconds{ms * 1'000'000LL}));
+}
+static core::Tick mk_tick(long long ms, double price, double volume = 1.0, const std::string &sym = "ABC")
+{
+    return core::Tick{
+        mk_ts_ms(ms),
+        core::Symbol{sym},
+        core::Price{price},
+        core::Volume{volume}};
+}
+static long long to_epoch_ms(core::Timestamp ts)
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(ts.time_since_epoch()).count();
+}
+// -------------------------------------------------------------
+
+TEST_CASE("Resampler aggregates ticks within the same minute", "[io][resampler]")
+{
+    io::TickToCandleResampler r(io::Timeframe::M1);
+    // 12:00:00.000, 12:00:03.000, 12:00:05.000 (same minute)
+    auto c1 = r.update(mk_tick(1693492800000LL, 100.0, 1.0));
+    auto c2 = r.update(mk_tick(1693492803000LL, 101.5, 2.0));
+    auto c3 = r.update(mk_tick(1693492805000LL, 99.0, 3.0));
+
+    // No candle until the bucket rolls or we flush
+    REQUIRE_FALSE(c1.has_value());
+    REQUIRE_FALSE(c2.has_value());
+    REQUIRE_FALSE(c3.has_value());
+
+    // EOF → flush partial candle
+    auto last = r.flush();
+    REQUIRE(last.has_value());
+
+    const auto &bar = *last;
+    REQUIRE(bar.open().value() == Approx(100.0));
+    REQUIRE(bar.high().value() == Approx(101.5));
+    REQUIRE(bar.low().value() == Approx(99.0));
+    REQUIRE(bar.close().value() == Approx(99.0));
+    REQUIRE(bar.volume().value() == Approx(6.0)); // 1+2+3
+
+    // Timestamp should be the minute floor (12:00:00.000)
+    REQUIRE(to_epoch_ms(bar.start_time()) == 1693492800000LL);
 }
 
-TEST_CASE("Resampler aggregates ticks into one candle and rolls on boundary")
+TEST_CASE("Resampler emits on boundary roll (next tick crosses minute)", "[io][resampler]")
 {
-    Resampler rs(Resampler::Duration{1000}); // 1s bars
+    io::TickToCandleResampler r(io::Timeframe::M1);
 
-    // Window [0,1000)
-    Tick t1{ms(100), Symbol{"TEST"}, Price{10.0}, Volume{2.0}};
-    Tick t2{ms(600), Symbol{"TEST"}, Price{12.0}, Volume{3.0}};
-    Tick t3{ms(999), Symbol{"TEST"}, Price{11.0}, Volume{5.0}};
+    // First minute (12:00)
+    r.update(mk_tick(1693492800000LL, 100.0, 1.0));
+    r.update(mk_tick(1693492803000LL, 101.5, 2.0));
+    r.update(mk_tick(1693492805000LL, 99.0, 3.0));
 
-    // Next window [1000,2000)
-    Tick t4{ms(1000), Symbol{"TEST"}, Price{13.0}, Volume{7.0}};
+    // Next tick at 12:01:00.000 (exact boundary) → should emit 12:00 bar
+    auto rolled = r.update(mk_tick(1693492860000LL, 102.0, 4.0));
+    REQUIRE(rolled.has_value());
 
-    REQUIRE_FALSE(rs.update(t1).has_value());
-    REQUIRE_FALSE(rs.update(t2).has_value());
-    REQUIRE_FALSE(rs.update(t3).has_value());
+    const auto &b0 = *rolled;
+    REQUIRE(b0.open().value() == Approx(100.0));
+    REQUIRE(b0.high().value() == Approx(101.5));
+    REQUIRE(b0.low().value() == Approx(99.0));
+    REQUIRE(b0.close().value() == Approx(99.0));
+    REQUIRE(b0.volume().value() == Approx(6.0));
+    REQUIRE(to_epoch_ms(b0.start_time()) == 1693492800000LL);
 
-    // This tick at exactly 1000ms rolls the [0,1000) candle
-    auto c1 = rs.update(t4);
-    REQUIRE(c1.has_value());
-
-    REQUIRE(c1->start_time() == ms(0));
-    REQUIRE(c1->open().value() == Approx(10.0));
-    REQUIRE(c1->high().value() == Approx(12.0));
-    REQUIRE(c1->low().value() == Approx(10.0));
-    REQUIRE(c1->close().value() == Approx(11.0));
-    REQUIRE(c1->volume().value() == Approx(2.0 + 3.0 + 5.0));
-
-    // Flush last partial candle [1000,2000) containing only t4
-    auto c2 = rs.flush();
-    REQUIRE(c2.has_value());
-    REQUIRE(c2->start_time() == ms(1000));
-    REQUIRE(c2->open().value() == Approx(13.0));
-    REQUIRE(c2->high().value() == Approx(13.0));
-    REQUIRE(c2->low().value() == Approx(13.0));
-    REQUIRE(c2->close().value() == Approx(13.0));
-    REQUIRE(c2->volume().value() == Approx(7.0));
+    // Now we are inside the 12:01 bucket with a single tick so far
+    auto tail = r.flush();
+    REQUIRE(tail.has_value());
+    const auto &b1 = *tail;
+    REQUIRE(b1.open().value() == Approx(102.0));
+    REQUIRE(b1.high().value() == Approx(102.0));
+    REQUIRE(b1.low().value() == Approx(102.0));
+    REQUIRE(b1.close().value() == Approx(102.0));
+    REQUIRE(b1.volume().value() == Approx(4.0));
+    REQUIRE(to_epoch_ms(b1.start_time()) == 1693492860000LL); // 12:01:00.000
 }
 
-TEST_CASE("Resampler rolls multiple windows; no empty candles are synthesized")
+TEST_CASE("Resampler handles gaps (no empty-bar fill in MVP)", "[io][resampler]")
 {
-    Resampler rs(Resampler::Duration{1000}); // 1s
+    io::TickToCandleResampler r(io::Timeframe::M1);
 
-    // ticks at 0.1s, 0.9s (first window)
-    rs.update(Tick{ms(100), Symbol{"X"}, Price{10}, Volume{1}});
-    rs.update(Tick{ms(900), Symbol{"X"}, Price{11}, Volume{2}});
+    // Tick in 12:00
+    r.update(mk_tick(1693492800000LL, 100.0, 1.0));
+    // Next tick jumps to 12:05 → roll 12:00, start 12:05 bucket
+    auto rolled = r.update(mk_tick(1693493100000LL, 110.0, 2.0)); // +5 minutes
 
-    // next tick jumps to 2.5s → should emit the [0,1000) candle,
-    // open [2000,3000) directly (no empty [1000,2000) candle is synthesized)
-    auto c1 = rs.update(Tick{ms(2500), Symbol{"X"}, Price{15}, Volume{4}});
-    REQUIRE(c1.has_value());
-    REQUIRE(c1->start_time() == ms(0));
-    REQUIRE(c1->open().value() == Approx(10));
-    REQUIRE(c1->high().value() == Approx(11));
-    REQUIRE(c1->low().value() == Approx(10));
-    REQUIRE(c1->close().value() == Approx(11));
-    REQUIRE(c1->volume().value() == Approx(3));
+    REQUIRE(rolled.has_value());
+    REQUIRE(to_epoch_ms(rolled->start_time()) == 1693492800000LL);
 
-    // Flush the partial [2000,3000) candle with single tick at 2.5s
-    auto c2 = rs.flush();
-    REQUIRE(c2.has_value());
-    REQUIRE(c2->start_time() == ms(2000));
-    REQUIRE(c2->open().value() == Approx(15));
-    REQUIRE(c2->high().value() == Approx(15));
-    REQUIRE(c2->low().value() == Approx(15));
-    REQUIRE(c2->close().value() == Approx(15));
-    REQUIRE(c2->volume().value() == Approx(4));
+    // Flush 12:05 partial
+    auto last = r.flush();
+    REQUIRE(last.has_value());
+    REQUIRE(to_epoch_ms(last->start_time()) == 1693493100000LL);
+
+    // We produced exactly 2 candles; no filler bars for 12:01..12:04 (by design in MVP)
+    // (Count verified implicitly by the two optionals we checked.)
+}
+
+TEST_CASE("Exact-boundary tick behavior (>= bucket_end rolls)", "[io][resampler]")
+{
+    io::TickToCandleResampler r(io::Timeframe::M1);
+
+    // One tick at 12:00:59.999 → still same bucket
+    r.update(mk_tick(1693492859999LL, 200.0, 1.0));
+    // Next tick at 12:01:00.000 → must roll
+    auto rolled = r.update(mk_tick(1693492860000LL, 201.0, 1.0));
+    REQUIRE(rolled.has_value());
+    REQUIRE(to_epoch_ms(rolled->start_time()) == 1693492800000LL);
+    REQUIRE(rolled->open().value() == Approx(200.0));
+    REQUIRE(rolled->close().value() == Approx(200.0));
+
+    // Flush shows the 12:01 bar
+    auto last = r.flush();
+    REQUIRE(last.has_value());
+    REQUIRE(to_epoch_ms(last->start_time()) == 1693492860000LL);
+    REQUIRE(last->open().value() == Approx(201.0));
+}
+
+TEST_CASE("Flush idempotency & empty-stream behavior", "[io][resampler]")
+{
+    io::TickToCandleResampler r(io::Timeframe::M1);
+
+    // No ticks → flush should be empty
+    auto none = r.flush();
+    REQUIRE_FALSE(none.has_value());
+
+    // Feed one tick, then flush twice
+    r.update(mk_tick(1693492800000LL, 42.0, 1.0));
+    auto once = r.flush();
+    REQUIRE(once.has_value());
+    // Second flush should yield nothing
+    auto twice = r.flush();
+    REQUIRE_FALSE(twice.has_value());
+}
+
+TEST_CASE("Aggregates volume & extremes correctly with many ticks", "[io][resampler]")
+{
+    io::TickToCandleResampler r(io::Timeframe::M1);
+
+    // Minute 12:00 with messy sequence
+    r.update(mk_tick(1693492800000LL, 100.0, 0.5));
+    r.update(mk_tick(1693492801000LL, 99.5, 1.2));
+    r.update(mk_tick(1693492802000LL, 101.2, 0.3));
+    r.update(mk_tick(1693492803000LL, 100.8, 2.0));
+    r.update(mk_tick(1693492804000LL, 100.1, 0.0));               // zero-volume edge
+    auto rolled = r.update(mk_tick(1693492860000LL, 100.0, 1.0)); // boundary → emit
+
+    REQUIRE(rolled.has_value());
+    const auto &b = *rolled;
+    REQUIRE(b.open().value() == Approx(100.0));
+    REQUIRE(b.high().value() == Approx(101.2));
+    REQUIRE(b.low().value() == Approx(99.5));
+    REQUIRE(b.close().value() == Approx(100.1)); // last price within the minute
+    REQUIRE(b.volume().value() == Approx(4.0));  // 0.5+1.2+0.3+2.0+0.0
 }

@@ -1,82 +1,76 @@
 #include "fin/io/Resampler.hpp"
-#include <algorithm>
+#include <chrono>
 
 namespace fin::io
 {
-
+    using namespace std::chrono;
     using namespace fin::core;
 
-    static inline long long to_ns_count(const Timestamp &ts)
+    static nanoseconds dur_for(Timeframe tf)
     {
-        using namespace std::chrono;
-        return duration_cast<nanoseconds>(ts.time_since_epoch()).count();
+        switch (tf)
+        {
+        case Timeframe::M1:
+        default:
+            return minutes(1);
+        }
     }
 
-    Timestamp Resampler::floor_ts(Timestamp ts) const
+    TickToCandleResampler::TickToCandleResampler(Timeframe tf) : tf_(tf) {}
+
+    Timestamp TickToCandleResampler::bucket_floor(Timestamp ts) const
     {
-        using namespace std::chrono;
-        const auto ns = duration_cast<nanoseconds>(ts.time_since_epoch()).count();
-        const auto step = duration_cast<nanoseconds>(interval_).count();
-        const auto flo = (ns / step) * step;
-        return Timestamp{nanoseconds(static_cast<long long>(flo))};
+        auto d = dur_for(tf_);
+        auto ns = ts.time_since_epoch();
+        auto base = ns - (ns % d);
+        return Timestamp(base);
     }
 
-    Candle Resampler::make_candle() const
+    Timestamp TickToCandleResampler::bucket_end(Timestamp start) const
     {
-        // Candle(Timestamp start, Price open, Price high, Price low, Price close, Volume vol)
-        return Candle(window_start_, open_, high_, low_, close_, vol_);
+        return Timestamp(start.time_since_epoch() + dur_for(tf_));
     }
 
-    void Resampler::open_new(Timestamp start, const Tick &t)
+    std::optional<Candle> TickToCandleResampler::update(const Tick &t)
     {
-        have_open_ = true;
-        window_start_ = start;
-        const Price p = t.price();
-        open_ = p;
-        high_ = p;
-        low_ = p;
-        close_ = p,
-        vol_ = t.volume();
-    }
+        const auto ts = t.timestamp();
+        if (!has_open_)
+        {
+            bucket_start_ = bucket_floor(ts);
+            open_ = high_ = low_ = close_ = t.price().value();
+            vol_ = t.volume().value();
+            has_open_ = true;
+            return std::nullopt;
+        }
 
-    void Resampler::accumulate(const Tick &t)
-    {
-        const Price p = t.price();
-        if (high_ < p)
-            high_ = p; // Price defines operator<
+        // New bucket?
+        if (ts >= bucket_end(bucket_start_))
+        {
+            Candle out{bucket_start_, Price{open_}, Price{high_}, Price{low_}, Price{close_}, Volume{vol_}};
+            // start new bucket
+            bucket_start_ = bucket_floor(ts);
+            open_ = high_ = low_ = close_ = t.price().value();
+            vol_ = t.volume().value();
+            return out;
+        }
+
+        // Same bucket -> aggregate
+        const double p = t.price().value();
+        if (p > high_)
+            high_ = p;
         if (p < low_)
             low_ = p;
         close_ = p;
-        vol_ = vol_ + t.volume(); // Volume defines operator+
+        vol_ += t.volume().value();
+        return std::nullopt;
     }
 
-    std::optional<Candle> Resampler::update(const Tick &t)
+    std::optional<Candle> TickToCandleResampler::flush()
     {
-        const auto start = floor_ts(t.timestamp());
-        if (!have_open_)
-        {
-            open_new(start, t);
+        if (!has_open_)
             return std::nullopt;
-        }
-
-        if (start == window_start_)
-        {
-            accumulate(t);
-            return std::nullopt;
-        }
-
-        // Roll window: emit previous, seed next with current tick
-        Candle finished = make_candle();
-        open_new(start, t);
-        return finished;
-    }
-
-    std::optional<Candle> Resampler::flush()
-    {
-        if (!have_open_)
-            return std::nullopt;
-        have_open_ = false;
-        return make_candle();
+        has_open_ = false;
+        return Candle{bucket_start_, Price{open_}, Price{high_}, Price{low_}, Price{close_}, Volume{vol_}};
     }
 
 } // namespace fin::io
