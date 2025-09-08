@@ -6,6 +6,7 @@
 #include <vector>
 #include <string_view>
 #include <chrono>
+#include <cctype>
 
 using namespace std::string_view_literals;
 
@@ -16,6 +17,17 @@ namespace fin::io
     using core::Tick;
     using core::Timestamp;
     using core::Volume;
+
+    static std::pair<const char *, const char *> trim(const std::string &s)
+    {
+        const char *b = s.data();
+        const char *e = b + s.size();
+        while (b < e && std::isspace(static_cast<unsigned char>(*b)))
+            ++b;
+        while (e > b && std::isspace(static_cast<unsigned char>(*(e - 1))))
+            --e;
+        return {b, e};
+    }
 
     static Timestamp from_epoch_ms(long long ms)
     {
@@ -102,17 +114,27 @@ namespace fin::io
                 continue;
             }
 
-            // Parse ts (epoch ms MVP)
+            // Parse ts (epoch millis, trimmed)
             long long ms = 0;
             {
-                const auto &s = cols[I.idx_ts];
-                auto *begin = s.data();
-                auto *end = s.data() + s.size();
-                if (auto [p, ec] = std::from_chars(begin, end, ms); ec != std::errc{})
+                auto [b, e] = trim(cols[I.idx_ts]);
+                if (b == e)
                 {
                     ++stats_.skipped;
                     continue;
+                } // empty after trim
+                long long x = 0;
+                if (auto [p, ec] = std::from_chars(b, e, x); ec != std::errc{})
+                {
+                    ++stats_.skipped; // not an integer
+                    continue;
                 }
+                if (x < 0)
+                {
+                    ++stats_.skipped;
+                    continue;
+                } // guard negative
+                ms = x;
             }
             Timestamp ts = from_epoch_ms(ms);
 

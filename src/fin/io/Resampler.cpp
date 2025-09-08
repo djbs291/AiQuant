@@ -10,6 +10,14 @@ namespace fin::io
     {
         switch (tf)
         {
+        case Timeframe::S1:
+            return seconds(1);
+        case Timeframe::S5:
+            return seconds(5);
+        case Timeframe::M5:
+            return minutes(5);
+        case Timeframe::H1:
+            return hours(1);
         case Timeframe::M1:
         default:
             return minutes(1);
@@ -34,6 +42,14 @@ namespace fin::io
     std::optional<Candle> TickToCandleResampler::update(const Tick &t)
     {
         const auto ts = t.timestamp();
+
+        // out-of-order? drop silently (MVP policy)
+        if (last_ts_ && ts < *last_ts_)
+        {
+            return std::nullopt;
+        }
+        last_ts_ = ts;
+
         if (!has_open_)
         {
             bucket_start_ = bucket_floor(ts);

@@ -31,6 +31,8 @@ namespace fin::io
         double open_ = 0, high_ = 0, low_ = 0, close_ = 0;
         double vol_ = 0;
 
+        std::optional<fin::core::Timestamp> last_ts_;
+
         fin::core::Timestamp bucket_floor(fin::core::Timestamp ts) const;
         fin::core::Timestamp bucket_end(fin::core::Timestamp ts) const;
     };

@@ -23,7 +23,11 @@ namespace fin::io
 
     enum class Timeframe
     {
-        M1
-    }; // extend later: M5, H1, ...
+        S1,
+        S5,
+        M1,
+        M5,
+        H1
+    }; // add as needed M5, H1,
 
 } // namespace fin::io
