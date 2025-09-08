@@ -31,7 +31,7 @@ namespace fin::indicators
         virtual void update(double price, double volume) = 0;
         virtual bool is_ready() const = 0;
         virtual double value() const = 0;
-    }
+    };
 
     // Multi-output indicators: expose their native struct via type param
     template <typename T>

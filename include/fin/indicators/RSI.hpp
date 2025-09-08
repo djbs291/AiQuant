@@ -12,6 +12,7 @@ namespace fin::indicators
     public:
         explicit RSI(std::size_t period);
 
+        void reset();
         void update(core::Price price);
         bool is_ready() const;
         double value() const;

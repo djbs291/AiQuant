@@ -6,6 +6,15 @@ namespace fin::indicators
 
     RSI::RSI(std::size_t period) : period_(period) {}
 
+    void RSI::reset()
+    {
+        avg_gain_ = 0.0;
+        avg_loss_ = 0.0;
+        last_price_ = 0.0;
+        count_ = 0;
+        ready_ = false;
+    }
+
     void RSI::update(core::Price price)
     {
         double current = price.value();
@@ -36,7 +45,7 @@ namespace fin::indicators
         else
         {
             avg_gain_ = (avg_gain_ * (period_ - 1) + gain) / period_;
-            avg_loss_ = (avg_loss_ * (period_ - 1) + gain) / period_;
+            avg_loss_ = (avg_loss_ * (period_ - 1) + loss) / period_;
         }
 
         last_price_ = current;

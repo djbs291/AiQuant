@@ -6,8 +6,8 @@
 
 namespace fin::indicators
 {
-
     // Scalar indicator that consumes an OHLCV Candle.
+    using namespace fin::core;
     class IIndicatorScalarCandle
     {
     public:

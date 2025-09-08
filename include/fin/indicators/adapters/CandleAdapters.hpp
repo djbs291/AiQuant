@@ -26,7 +26,7 @@ namespace fin::indicators
     {
     public:
         explicit SMAFromCandle(std::size_t period) : sma_(period) {}
-        void update(const Candle &c) override { last_ = sma_.update(c.close); }
+        void update(const Candle &c) override { last_ = sma_.update(c.close().value()); }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
         void reset() override
@@ -45,7 +45,7 @@ namespace fin::indicators
     {
     public:
         explicit EMAFromCandle(std::size_t period) : ema_(period) {}
-        void update(const Candle &c) override { last_ = ema_.update(c.close); }
+        void update(const Candle &c) override { last_ = ema_.update(c.close().value()); }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
         void reset() override
@@ -64,7 +64,11 @@ namespace fin::indicators
     {
     public:
         explicit RSIFromCandle(std::size_t period = 14) : rsi_(period) {}
-        void update(const Candle &c) override { last_ = rsi_.update(c.close); }
+        void update(const Candle &c) override
+        {
+            rsi_.update(c.close());
+            last_ = rsi_.is_ready() ? std::optional<double>(rsi_.value()) : std::nullopt;
+        }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
         void reset() override
@@ -83,7 +87,7 @@ namespace fin::indicators
     {
     public:
         explicit ZScoreFromCandle(std::size_t period = 20) : zs_(period) {}
-        void update(const Candle &c) override { last_ = zs_.update(c.close); }
+        void update(const Candle &c) override { last_ = zs_.update(c.close().value()); }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
         void reset() override
@@ -104,7 +108,7 @@ namespace fin::indicators
         explicit MomentumFromCandle(std::size_t period = 10,
                                     Momentum::Mode mode = Momentum::Mode::Difference)
             : mom_(period, mode) {}
-        void update(const Candle &c) override { last_ = mom_.update(c.close); }
+        void update(const Candle &c) override { last_ = mom_.update(c.close().value()); }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
         void reset() override
@@ -124,7 +128,7 @@ namespace fin::indicators
     public:
         MACDHistFromCandle(std::size_t fast = 12, std::size_t slow = 26, std::size_t signal = 9)
             : macd_(fast, slow, signal) {}
-        void update(const Candle &c) override { pack_ = macd_.update(c.close); }
+        void update(const Candle &c) override { pack_ = macd_.update(c.close().value()); }
         bool is_ready() const override { return pack_.has_value(); }
         double value() const override { return pack_->hist; }
         void reset() override
@@ -143,7 +147,7 @@ namespace fin::indicators
     {
     public:
         BollingerMidFromCandle(std::size_t period = 20, double k = 2.0) : bb_(period, k) {}
-        void update(const Candle &c) override { bands_ = bb_.update(c.close); }
+        void update(const Candle &c) override { bands_ = bb_.update(c.close().value()); }
         bool is_ready() const override { return bands_.has_value(); }
         double value() const override { return bands_->middle; }
         void reset() override
@@ -162,7 +166,10 @@ namespace fin::indicators
     {
     public:
         explicit ATRFromCandle(std::size_t period = 14) : atr_(period) {}
-        void update(const Candle &c) override { last_ = atr_.update(c.high, c.low, c.close); }
+        void update(const Candle &c) override
+        {
+            last_ = atr_.update(c.high().value(), c.low().value(), c.close().value());
+        }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
         void reset() override
@@ -181,7 +188,10 @@ namespace fin::indicators
     {
     public:
         explicit ADXFromCandle(std::size_t period = 14) : adx_(period) {}
-        void update(const Candle &c) override { pack_ = adx_.update(c.high, c.low, c.close); }
+        void update(const Candle &c) override
+        {
+            pack_ = adx_.update(c.high().value(), c.low().value(), c.close().value());
+        }
         bool is_ready() const override { return pack_.has_value(); }
         double value() const override { return pack_->adx; }
         void reset() override
@@ -200,7 +210,10 @@ namespace fin::indicators
     {
     public:
         StochKFromCandle(std::size_t k = 14, std::size_t d = 3) : st_(k, d) {}
-        void update(const Candle &c) override { last_ = st_.update(c.high, c.low, c.close); }
+        void update(const Candle &c) override
+        {
+            last_ = st_.update(c.high().value(), c.low().value(), c.close().value());
+        }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return last_->k; }
         void reset() override
@@ -221,8 +234,8 @@ namespace fin::indicators
         VWAPFromCandle() = default;
         void update(const Candle &c) override
         {
-            const double tp = (c.high + c.low + c.close) / 3.0;
-            last_ = vwap_.update(tp, c.volume);
+            const double tp = (c.high().value() + c.low().value() + c.close().value()) / 3.0;
+            last_ = vwap_.update(tp, c.volume().value());
         }
         bool is_ready() const override { return last_.has_value(); } // available from first
         double value() const override { return *last_; }

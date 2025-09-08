@@ -6,6 +6,8 @@
 #include "fin/indicators/ZScore.hpp"
 #include "fin/indicators/Momentum.hpp"
 #include "fin/indicators/MACD.hpp" // for hist via IIndicatorScalarPrice
+// For RSI which consumes Price
+#include "fin/core/Price.hpp"
 
 namespace fin::indicators
 {
@@ -28,7 +30,7 @@ namespace fin::indicators
     {
     public:
         explicit EMAIndicator(std::size_t period) : ema_(period) {}
-        void update(double price) override { last_ = ema_update(price); }
+        void update(double price) override { last_ = ema_.update(price); }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
 
@@ -42,7 +44,11 @@ namespace fin::indicators
     {
     public:
         explicit RSIIndicator(std::size_t period = 14) : rsi_(period) {}
-        void update(double price) override { last_ = rsi_.update(price); }
+        void update(double price) override
+        {
+            rsi_.update(fin::core::Price(price));
+            last_ = rsi_.is_ready() ? std::optional<double>(rsi_.value()) : std::nullopt;
+        }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
 
@@ -61,7 +67,7 @@ namespace fin::indicators
         double value() const override { return *last_; }
 
     private:
-        ZSCore zs_;
+        ZScore zs_;
         std::optional<double> last_;
     };
 
@@ -70,7 +76,7 @@ namespace fin::indicators
     {
     public:
         explicit MomentumIndicator(std::size_t period = 10, Momentum::Mode mode = Momentum::Mode::Difference) : mom_(period, mode) {}
-        void update(double price) override { last_ = mom_update(price); }
+        void update(double price) override { last_ = mom_.update(price); }
         bool is_ready() const override { return last_.has_value(); }
         double value() const override { return *last_; }
 
