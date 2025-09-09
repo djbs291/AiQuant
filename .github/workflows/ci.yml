@@ -25,7 +25,15 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build ccache lcov
+          sudo apt-get install -y cmake ninja-build ccache
+
+      - name: Install lcov
+        run: |
+          curl -L https://github.com/linux-test-project/lcov/releases/latest/download/lcov.tar.gz -o lcov.tar.gz
+          tar -xzf lcov.tar.gz
+          cd lcov-*
+          make install PREFIX=$HOME/.local
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Configure (Debug)
         run: |
