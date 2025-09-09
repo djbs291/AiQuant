@@ -19,31 +19,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps
+      # No apt on some runners; fetch lcov scripts directly from GitHub releases
+      - name: Install lcov (no-apt)
         run: |
-          # Core build tools
-          sudo apt-get install -y cmake ninja-build make libcapture-tiny-perl libdatetime-perl
-          sudo apt-get update
-          # Core build tools
-          sudo apt-get install -y cmake ninja-build
-          # Catch2 headers/library (package name differs by distro)
-          sudo apt-get install -y catch2 libcatch2-dev || true
-
-      - name: Install lcov
-        run: |
+          set -euo pipefail
           LCOV_TAG=$(curl -s https://api.github.com/repos/linux-test-project/lcov/releases/latest | grep tag_name | cut -d '"' -f 4)
-          LCOV_VERSION=${LCOV_TAG#v}
-          curl -L "https://github.com/linux-test-project/lcov/releases/download/${LCOV_TAG}/lcov-${LCOV_VERSION}.tar.gz" -o lcov.tar.gz
-          tar -xzf lcov.tar.gz
-          cd "lcov-${LCOV_VERSION}"
-          make install PREFIX=$HOME/.local
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          export PATH="$HOME/.local/bin:$PATH"
+          LCOV_VER=${LCOV_TAG#v}
+          curl -sSL "https://github.com/linux-test-project/lcov/releases/download/${LCOV_TAG}/lcov-${LCOV_VER}.tar.gz" -o lcov.tgz
+          mkdir -p lcov-src
+          tar -xzf lcov.tgz -C lcov-src
+          echo "$PWD/lcov-src/lcov-${LCOV_VER}/bin" >> $GITHUB_PATH
+          echo "Added lcov to PATH: $PWD/lcov-src/lcov-${LCOV_VER}/bin"
           lcov --version
 
       - name: Configure (Coverage)
         run: |
-          cmake -S . -B build-cov -G Ninja \
+          cmake -S . -B build-cov \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_FLAGS="$CFLAGS" \
             -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
