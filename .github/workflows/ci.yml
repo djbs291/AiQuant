@@ -24,9 +24,10 @@ jobs:
 
       - name: Install deps
         run: |
+          sudo apt-get install -y cmake ninja-build ccache make libcapture-tiny-perl libdatetime-perl
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build ccache
-
+          
       - name: Install lcov
         run: |
           LCOV_TAG=$(curl -s https://api.github.com/repos/linux-test-project/lcov/releases/latest | grep tag_name | cut -d '"' -f 4)
@@ -36,6 +37,8 @@ jobs:
           cd "lcov-${LCOV_VERSION}"
           make install PREFIX=$HOME/.local
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+          lcov --version
 
       - name: Configure (Debug)
         run: |

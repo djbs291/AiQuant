@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   coverage:
@@ -17,27 +19,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps
+      # No apt on some runners; fetch lcov scripts directly from GitHub releases
+      - name: Install lcov (no-apt)
         run: |
-          sudo apt-get update
-          # Core build tools
-          sudo apt-get install -y cmake ninja-build
-          # Catch2 headers/library (package name differs by distro)
-          sudo apt-get install -y catch2 libcatch2-dev || true
-
-      - name: Install lcov
-        run: |
-          LCOV_TAG=$(curl -s https://api.github.com/repos/linux-test-project/lcov/releases/latest | grep tag_name | cut -d '"' -f 4)
-          LCOV_VERSION=${LCOV_TAG#v}
-          curl -L "https://github.com/linux-test-project/lcov/releases/download/${LCOV_TAG}/lcov-${LCOV_VERSION}.tar.gz" -o lcov.tar.gz
-          tar -xzf lcov.tar.gz
-          cd "lcov-${LCOV_VERSION}"
-          make install PREFIX=$HOME/.local
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          set -euo pipefail
+          # Pin to 1.16 to avoid extra Perl module deps present in newer releases
+          LCOV_VER=1.16
+          curl -sSL "https://github.com/linux-test-project/lcov/archive/refs/tags/v${LCOV_VER}.tar.gz" -o lcov.tgz
+          mkdir -p lcov-src
+          tar -xzf lcov.tgz -C lcov-src
+          LCOV_ROOT="$PWD/lcov-src/lcov-${LCOV_VER}"
+          LCOV_BIN="$LCOV_ROOT/bin"
+          # Make available in subsequent steps
+          echo "$LCOV_BIN" >> "$GITHUB_PATH"
+          # Also use it in this step
+          export PATH="$LCOV_BIN:$PATH"
+          echo "Added lcov to PATH: $LCOV_BIN"
+          lcov --version
 
       - name: Configure (Coverage)
         run: |
-          cmake -S . -B build-cov -G Ninja \
+          cmake -S . -B build-cov \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_FLAGS="$CFLAGS" \
             -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
@@ -52,10 +54,15 @@ jobs:
 
       - name: Capture coverage
         run: |
-          lcov --directory build-cov --capture --output-file coverage.info
-          # optionally filter out system & test files
-          lcov --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
-          lcov --list coverage.info
+          # lcov 1.16 does not support --ignore-errors inconsistent
+          # Use only the rc knob to avoid unexecuted block noise.
+          lcov --rc geninfo_unexecuted_blocks=1 \
+               --directory build-cov --capture --output-file coverage.info
+          # filter out system & tests
+          lcov --rc geninfo_unexecuted_blocks=1 \
+               --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
+          # show summary
+          lcov --rc geninfo_unexecuted_blocks=1 --list coverage.info
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
