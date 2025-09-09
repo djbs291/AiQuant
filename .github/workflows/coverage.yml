@@ -23,9 +23,9 @@ jobs:
       - name: Install lcov (no-apt)
         run: |
           set -euo pipefail
-          LCOV_TAG=$(curl -s https://api.github.com/repos/linux-test-project/lcov/releases/latest | grep tag_name | cut -d '"' -f 4)
-          LCOV_VER=${LCOV_TAG#v}
-          curl -sSL "https://github.com/linux-test-project/lcov/releases/download/${LCOV_TAG}/lcov-${LCOV_VER}.tar.gz" -o lcov.tgz
+          # Pin to 1.16 to avoid extra Perl module deps present in newer releases
+          LCOV_VER=1.16
+          curl -sSL "https://github.com/linux-test-project/lcov/archive/refs/tags/v${LCOV_VER}.tar.gz" -o lcov.tgz
           mkdir -p lcov-src
           tar -xzf lcov.tgz -C lcov-src
           LCOV_ROOT="$PWD/lcov-src/lcov-${LCOV_VER}"
@@ -35,7 +35,7 @@ jobs:
           # Also use it in this step
           export PATH="$LCOV_BIN:$PATH"
           echo "Added lcov to PATH: $LCOV_BIN"
-          "$LCOV_BIN/lcov" --version
+          lcov --version
 
       - name: Configure (Coverage)
         run: |
@@ -53,15 +53,16 @@ jobs:
         run: ctest --test-dir build-cov --output-on-failure
 
       - name: Capture coverage
-        env:
-          LCOV_ARGS: --ignore-errors inconsistent --rc geninfo_unexecuted_blocks=1
         run: |
-          # capture
-          lcov $LCOV_ARGS --directory build-cov --capture --output-file coverage.info
+          # lcov 1.16 does not support --ignore-errors inconsistent
+          # Use only the rc knob to avoid unexecuted block noise.
+          lcov --rc geninfo_unexecuted_blocks=1 \
+               --directory build-cov --capture --output-file coverage.info
           # filter out system & tests
-          lcov $LCOV_ARGS --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
+          lcov --rc geninfo_unexecuted_blocks=1 \
+               --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
           # show summary
-          lcov $LCOV_ARGS --list coverage.info
+          lcov --rc geninfo_unexecuted_blocks=1 --list coverage.info
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
