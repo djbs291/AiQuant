@@ -20,7 +20,11 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build lcov
+          # Install CMake/Ninja/lcov and Catch2 (v2 or v3 depending on Ubuntu image)
+          sudo apt-get install -y cmake ninja-build lcov || true
+          sudo apt-get install -y catch2 || true
+          sudo apt-get install -y libcatch2-dev || true
+          sudo apt-get install -y libcatch2-3-dev || true
 
       - name: Configure (Coverage)
         run: |
