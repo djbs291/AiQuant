@@ -25,6 +25,8 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get install -y cmake ninja-build ccache make libcapture-tiny-perl libdatetime-perl
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build ccache
 
       - name: Install lcov
         run: |
