@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   coverage:
@@ -19,11 +21,21 @@ jobs:
 
       - name: Install deps
         run: |
-          sudo apt-get update
-          # Core build tools + lcov
-          sudo apt-get install -y cmake ninja-build lcov
+          # Core build tools
+          sudo apt-get install -y cmake ninja-build make libcapture-tiny-perl libdatetime-perl
           # Catch2 headers/library (package name differs by distro)
           sudo apt-get install -y catch2 libcatch2-dev || true
+
+      - name: Install lcov
+        run: |
+          LCOV_TAG=$(curl -s https://api.github.com/repos/linux-test-project/lcov/releases/latest | grep tag_name | cut -d '"' -f 4)
+          LCOV_VERSION=${LCOV_TAG#v}
+          curl -L "https://github.com/linux-test-project/lcov/releases/download/${LCOV_TAG}/lcov-${LCOV_VERSION}.tar.gz" -o lcov.tar.gz
+          tar -xzf lcov.tar.gz
+          cd "lcov-${LCOV_VERSION}"
+          make install PREFIX=$HOME/.local
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          $HOME/.local/bin/lcov --version
 
       - name: Configure (Coverage)
         run: |
