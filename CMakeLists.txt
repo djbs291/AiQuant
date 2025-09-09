@@ -132,6 +132,7 @@ if(Catch2_FOUND AND TEST_SOURCES)
         catch_discover_tests(aiquant_tests)
     else()
         add_test(NAME aiquant_tests COMMAND aiquant_tests)
+
         if(TARGET Catch2::Catch2WithMain)
             add_test(NAME test_io COMMAND test_io)
             add_test(NAME test_resampler COMMAND test_resampler)
