@@ -1,5 +1,5 @@
 // tests/io/test_resampler_m5.cpp
-#include <catch2/catch.hpp>
+#include "catch2_compat.hpp"
 #include "fin/io/Resampler.hpp"
 #include "fin/core/Tick.hpp"
 #include "fin/core/Candle.hpp"

@@ -1,20 +1,4 @@
-// Detectar automaticamente qual versão do Catch2 usar
-#if __has_include(<catch2/catch_test_macros.hpp>)
-// Catch2 v3
-#include <catch2/catch_test_macros.hpp>
-#elif __has_include(<catch2/catch.hpp>)
-// Catch2 v2 ou single header na pasta catch2/
-#include <catch2/catch.hpp>
-#elif __has_include("catch.hpp")
-// Single header version na pasta local
-#include "catch.hpp"
-#elif __has_include(<catch.hpp>)
-// Single header version instalado globalmente
-#include <catch.hpp>
-#else
-#error "Nenhum header do Catch2 encontrado!"
-#endif
-
+#include "catch2_compat.hpp"
 #include <string>
 
 // Teste básico para verificar que tudo compila

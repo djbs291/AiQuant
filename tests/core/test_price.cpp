@@ -1,6 +1,6 @@
 #define CATCH_CONFIG_MAIN
 
-#include <catch2/catch.hpp>
+#include "catch2_compat.hpp"
 #include "fin/core/Price.hpp"
 
 using namespace fin::core;

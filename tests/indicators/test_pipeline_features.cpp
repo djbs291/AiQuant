@@ -1,5 +1,5 @@
 // tests/integration/test_pipeline_features.cpp
-#include <catch2/catch.hpp> // or <catch2/catch_test_macros.hpp> if v3
+#include "catch2_compat.hpp"
 #include <fstream>
 
 #include "fin/io/Pipeline.hpp" // resample_csv_m1_with_stats(...)

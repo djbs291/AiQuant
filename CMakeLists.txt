@@ -46,8 +46,8 @@ target_include_directories(fin_indicators PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc
 target_compile_features(fin_indicators PUBLIC cxx_std_20)
 
 # ============ IO Library ============
-file(GLOB_RECURSE IND_SRC "src/fin/io/*.cpp")
-add_library(fin_io STATIC ${IND_SRC})
+file(GLOB_RECURSE IO_SRC "src/fin/io/*.cpp")
+add_library(fin_io STATIC ${IO_SRC})
 target_include_directories(fin_io PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(fin_io PUBLIC cxx_std_20)
 
@@ -84,17 +84,17 @@ if(NOT Catch2_FOUND)
     endif()
 endif()
 
-# As a final fallback, fetch Catch2 using FetchContent
-if(NOT Catch2_FOUND)
-    include(FetchContent)
-    message(STATUS "Catch2 not found locally. Fetching from upstream...")
-    FetchContent_Declare(
-        Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.4.0
-    )
-    FetchContent_MakeAvailable(Catch2)
+# Try bundled headers if Catch2 is still not found
+if(NOT Catch2_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/catch2/catch.hpp")
+    message(STATUS "Using bundled Catch2 headers")
+    add_library(Catch2::Catch2 INTERFACE IMPORTED)
+    target_include_directories(Catch2::Catch2 INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     set(Catch2_FOUND TRUE)
+endif()
+
+# If Catch2 is still missing, disable tests
+if(NOT Catch2_FOUND)
+    message(STATUS "Catch2 not found; unit tests will be skipped.")
 endif()
 
 # Configure Test Executable
@@ -102,29 +102,28 @@ file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp" "tests/*.cc" "tests/*.cxx")
 
 if(Catch2_FOUND AND TEST_SOURCES)
     add_executable(aiquant_tests ${TEST_SOURCES})
-    add_executable(test_io tests/io/test_tick_to_candle.cpp)
-    add_executable(test_resampler tests/io/test_resampler.cpp)
-    add_executable(test_pipeline tests/io/test_pipeline_tick_csv_to_candles.cpp)
 
     if(TARGET Catch2::Catch2WithMain)
         target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io)
+
+        add_executable(test_io tests/io/test_tick_to_candle.cpp)
         target_link_libraries(test_io PRIVATE fin_io fin_core Catch2::Catch2WithMain)
+        add_executable(test_resampler tests/io/test_resampler.cpp)
         target_link_libraries(test_resampler PRIVATE fin_io fin_core Catch2::Catch2WithMain)
+        add_executable(test_pipeline tests/io/test_pipeline_tick_csv_to_candles.cpp)
         target_link_libraries(test_pipeline PRIVATE fin_io fin_core Catch2::Catch2WithMain)
+
+        target_include_directories(test_io PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+        target_include_directories(test_resampler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+        target_include_directories(test_pipeline PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+
         message(STATUS "Using Catch2 v3")
     else()
         target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io)
-        target_link_libraries(test_io PRIVATE fin_io fin_core Catch2::Catch2)
-        target_link_libraries(test_resampler PRIVATE fin_io fin_core Catch2::Catch2)
-        target_link_libraries(test_pipeline PRIVATE fin_io fin_core Catch2::Catch2)
-        message(STATUS "Using Catch2 v2")
+        message(STATUS "Using bundled or Catch2 v2")
     endif()
 
-    target_include_directories(aiquant_tests
-        PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    )
+    target_include_directories(aiquant_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     target_compile_features(aiquant_tests PRIVATE cxx_std_20)
     include(CTest)
 
@@ -133,9 +132,12 @@ if(Catch2_FOUND AND TEST_SOURCES)
         catch_discover_tests(aiquant_tests)
     else()
         add_test(NAME aiquant_tests COMMAND aiquant_tests)
-        add_test(NAME test_io COMMAND test_io)
-        add_test(NAME test_resampler COMMAND test_resampler)
-        add_test(NAME test_pipeline COMMAND test_pipeline)
+
+        if(TARGET Catch2::Catch2WithMain)
+            add_test(NAME test_io COMMAND test_io)
+            add_test(NAME test_resampler COMMAND test_resampler)
+            add_test(NAME test_pipeline COMMAND test_pipeline)
+        endif()
     endif()
 else()
     message(STATUS "Catch2 not found or no test files found. Unit tests disabled.")
