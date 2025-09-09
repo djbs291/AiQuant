@@ -1,0 +1,35 @@
+name: Sanitizers
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+
+jobs:
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+      CFLAGS: "-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+      CXXFLAGS: "-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Configure with sanitizers
+        run: |
+          cmake -S . -B build-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="$CFLAGS" \
+            -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+
+      - name: Build
+        run: cmake --build build-asan
+
+      - name: Test (ASan/UBSan)
+        run: ctest --test-dir build-asan --output-on-failure
