@@ -1,5 +1,5 @@
 // tests/io/test_tick_to_candle.cpp
-#include <catch2/catch.hpp>
+#include "catch2_compat.hpp"
 #include <fstream>
 #include <vector>
 

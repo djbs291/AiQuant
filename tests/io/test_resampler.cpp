@@ -1,4 +1,4 @@
-#include <catch2/catch.hpp>
+#include "catch2_compat.hpp"
 #include <vector>
 #include <chrono>
 

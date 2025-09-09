@@ -23,7 +23,7 @@ jobs:
           # Core build tools + lcov
           sudo apt-get install -y cmake ninja-build lcov
           # Catch2 headers/library (package name differs by distro)
-          sudo apt-get install -y catch2 libcatch2-dev || truew
+          sudo apt-get install -y catch2 libcatch2-dev || true
 
       - name: Configure (Coverage)
         run: |

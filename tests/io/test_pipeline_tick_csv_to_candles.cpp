@@ -1,4 +1,4 @@
-#include <catch2/catch.hpp> // (v2 path; if you’re on v3, swap to catch_test_macros.hpp)
+#include "catch2_compat.hpp"
 #include <fstream>
 #include <sstream>
 #include <chrono>
