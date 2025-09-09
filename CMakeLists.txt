@@ -80,6 +80,19 @@ if(NOT Catch2_FOUND)
     endif()
 endif()
 
+# As a final fallback, fetch Catch2 using FetchContent
+if(NOT Catch2_FOUND)
+    include(FetchContent)
+    message(STATUS "Catch2 not found locally. Fetching from upstream...")
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.4.0
+    )
+    FetchContent_MakeAvailable(Catch2)
+    set(Catch2_FOUND TRUE)
+endif()
+
 # Configure Test Executable
 file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp" "tests/*.cc" "tests/*.cxx")
 if(Catch2_FOUND AND TEST_SOURCES)
