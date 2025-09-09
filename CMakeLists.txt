@@ -46,8 +46,8 @@ target_include_directories(fin_indicators PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc
 target_compile_features(fin_indicators PUBLIC cxx_std_20)
 
 # ============ IO Library ============
-file(GLOB_RECURSE IND_SRC "src/fin/io/*.cpp")
-add_library(fin_io STATIC ${IND_SRC})
+file(GLOB_RECURSE IO_SRC "src/fin/io/*.cpp")
+add_library(fin_io STATIC ${IO_SRC})
 target_include_directories(fin_io PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(fin_io PUBLIC cxx_std_20)
 
