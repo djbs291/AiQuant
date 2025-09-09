@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           # Core build tools
-          sudo apt-get install -y cmake ninja-build
+          sudo apt-get install -y cmake ninja-build make libcapture-tiny-perl
           # Catch2 headers/library (package name differs by distro)
           sudo apt-get install -y catch2 libcatch2-dev || true
 
@@ -34,6 +34,7 @@ jobs:
           cd "lcov-${LCOV_VERSION}"
           make install PREFIX=$HOME/.local
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+          $HOME/.local/bin/lcov --version
 
       - name: Configure (Coverage)
         run: |
