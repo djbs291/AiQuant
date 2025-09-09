@@ -53,12 +53,15 @@ jobs:
         run: ctest --test-dir build-cov --output-on-failure
 
       - name: Capture coverage
+        env:
+          LCOV_ARGS: --ignore-errors inconsistent --rc geninfo_unexecuted_blocks=1
         run: |
-          LCOV_OPTS="--ignore-errors inconsistent --rc geninfo_unexecuted_blocks=1"
-          lcov $LCOV_OPTS --directory build-cov --capture --output-file coverage.info
-          # optionally filter out system & test files
-          lcov $LCOV_OPTS --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
-          lcov $LCOV_OPTS --list coverage.info
+          # capture
+          lcov $LCOV_ARGS --directory build-cov --capture --output-file coverage.info
+          # filter out system & tests
+          lcov $LCOV_ARGS --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
+          # show summary
+          lcov $LCOV_ARGS --list coverage.info
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
