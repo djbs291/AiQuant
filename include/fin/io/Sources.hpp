@@ -1,6 +1,6 @@
 #pragma once
 #ifndef FIN_IO_TICK_SOURCE_HPP
-#define FIN_TO_TICK_SOURCE_HPP
+#define FIN_IO_TICK_SOURCE_HPP
 
 #include <optional>
 #include <string>
