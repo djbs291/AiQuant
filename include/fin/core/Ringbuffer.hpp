@@ -40,7 +40,7 @@ namespace fin::core
     }
 
     template <typename T, std::size_t N>
-    std : size_t RingBuffer<T, N> : size() const
+    std::size_t RingBuffer<T, N>::size() const
     {
         return count_;
     }

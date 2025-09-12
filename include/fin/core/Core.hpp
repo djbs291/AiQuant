@@ -1,4 +1,4 @@
-#pragma
+#pragma once
 #include "Timestamp.hpp"
 #include "Price.hpp"
 #include "Volume.hpp"
