@@ -2,17 +2,36 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <charconv>
 
 #include "fin/io/Pipeline.hpp"
 #include "fin/backtest/Backtester.hpp"
 
 using namespace fin;
 
+static std::optional<double> parse_double_flag(const std::vector<std::string> &args,
+                                               const std::string &flag)
+{
+    for (std::size_t i = 1; i + 1 < args.size(); ++i) // start after path (args[0])
+    {
+        if (args[i] == flag)
+        {
+            const std::string &s = args[i + 1];
+            double v = 0.0;
+            auto *b = s.data();
+            auto *e = s.data() + s.size();
+            if (auto [p, ec] = std::from_chars(b, e, v); ec == std::errc{})
+                return v;
+        }
+    }
+    return std::nullopt;
+}
+
 static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant backtest <ticks.csv>\n";
+        std::cerr << "Usage: aiquant backtest <ticks.csv> [ --cash N] [--qty N] [--fee N]\n";
         return 2;
     }
 
@@ -22,7 +41,13 @@ static int cmd_backtest(const std::vector<std::string> &args)
     auto res = fin::io::resample_csv_m1_with_stats(path, opt);
 
     fin::backtest::BacktestConfig cfg{}; // defaults
-    fin::signal::SignalEngine eng{};     // defaults
+    if (auto v = parse_double_flag(args, "--cash"))
+        cfg.initial_cash = *v;
+    if (auto v = parse_double_flag(args, "--qty"))
+        cfg.trade_qty = *v;
+    if (auto v = parse_double_flag(args, "--fee"))
+        cfg.fee_per_trade = *v;
+    fin::signal::SignalEngine eng{}; // defaults
     fin::backtest::Backtester bt(cfg, eng);
 
     for (const auto &c : res.candles)
@@ -45,7 +70,8 @@ int main(int argc, char **argv)
     {
         std::cout << "AiQuant CLI (MVP)\n";
         std::cout << "Commands: \n";
-        std::cout << " backtest <ticks.csv>     Resample M1 and run RSI+EMA strategy\n";
+        std::cout << " backtest <ticks.csv>  [--cash N] [--qty N] [--fee N]\n";
+        std::cout << "    Resample M1 and run RSI+EMA strategy\n";
         return 0;
     }
 
@@ -55,6 +81,6 @@ int main(int argc, char **argv)
         return cmd_backtest({args.begin() + 1, args.end()});
     }
 
-    std::cerr << "Unknow command: " << cmd << "\n";
+    std::cerr << "Unknown command: " << cmd << "\n";
     return 1;
 }
