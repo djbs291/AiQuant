@@ -1,5 +1,6 @@
 # Ignore build directory
 build/
+build-cov/
 
 # Ignore VSCode settings
 .vscode/

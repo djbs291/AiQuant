@@ -46,7 +46,7 @@ namespace fin::backtest
     class Backtester
     {
     public:
-        Backtester(BacktestConfig cfg = {}, fin::signal::SignalEngine engine = {});
+        Backtester(BacktestConfig cfg = {}, fin::signal::SignalEngine engine = fin::signal::SignalEngine(fin::signal::SignalEngineConfig{}));
 
         void reset();
 
