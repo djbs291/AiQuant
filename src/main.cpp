@@ -27,6 +27,24 @@ static std::optional<double> parse_double_flag(const std::vector<std::string> &a
     return std::nullopt;
 }
 
+static std::optional<std::size_t> parse_size_flag(const std::vector<std::string> &args,
+                                                  const std::string &flag)
+{
+    for (std::size_t i = 1; i + 1 < args.size(); ++i)
+    {
+        if (args[i] == flag)
+        {
+            const std::string &s = args[i + 1];
+            std::size_t v = 0;
+            auto *b = s.data();
+            auto *e = s.data() + s.size();
+            if (auto [p, ec] = std::from_chars(b, e, v); ec == std::errc{})
+                return v;
+        }
+    }
+    return std::nullopt;
+}
+
 static fin::io::Timeframe parse_timeframe_flag(const std::vector<std::string> &args)
 {
     for (std::size_t i = 1; i + 1 < args.size(); ++i)
@@ -52,7 +70,7 @@ static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N]\n";
+        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N]\n";
         return 2;
     }
 
@@ -69,6 +87,12 @@ static int cmd_backtest(const std::vector<std::string> &args)
         cfg.trade_qty = *v;
     if (auto v = parse_double_flag(args, "--fee"))
         cfg.fee_per_trade = *v;
+    if (auto v = parse_size_flag(args, "--ema-fast"))
+        cfg.ema_fast = *v;
+    if (auto v = parse_size_flag(args, "--ema-slow"))
+        cfg.ema_slow = *v;
+    if (auto v = parse_size_flag(args, "--rsi"))
+        cfg.rsi_period = *v;
     fin::signal::SignalEngine eng{}; // defaults
     fin::backtest::Backtester bt(cfg, eng);
 
@@ -92,7 +116,7 @@ int main(int argc, char **argv)
     {
         std::cout << "AiQuant CLI (MVP)\n";
         std::cout << "Commands: \n";
-        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N]\n";
+        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N]\n";
         std::cout << "    Resample candles and run RSI+EMA strategy\n";
         return 0;
     }
