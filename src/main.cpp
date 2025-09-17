@@ -27,18 +27,40 @@ static std::optional<double> parse_double_flag(const std::vector<std::string> &a
     return std::nullopt;
 }
 
+static fin::io::Timeframe parse_timeframe_flag(const std::vector<std::string> &args)
+{
+    for (std::size_t i = 1; i + 1 < args.size(); ++i)
+    {
+        if (args[i] == "--tf")
+        {
+            const std::string &tf = args[i + 1];
+            if (tf == "S1")
+                return fin::io::Timeframe::S1;
+            if (tf == "S5")
+                return fin::io::Timeframe::S5;
+            if (tf == "M5")
+                return fin::io::Timeframe::M5;
+            if (tf == "H1")
+                return fin::io::Timeframe::H1;
+            return fin::io::Timeframe::M1;
+        }
+    }
+    return fin::io::Timeframe::M1;
+}
+
 static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant backtest <ticks.csv> [ --cash N] [--qty N] [--fee N]\n";
+        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N]\n";
         return 2;
     }
 
     const std::string path = args[0];
 
     fin::io::TickCsvOptions opt{}; // defaults: header, epoch-ms
-    auto res = fin::io::resample_csv_m1_with_stats(path, opt);
+    auto tf = parse_timeframe_flag(args);
+    auto res = fin::io::resample_csv_with_stats(path, tf, opt);
 
     fin::backtest::BacktestConfig cfg{}; // defaults
     if (auto v = parse_double_flag(args, "--cash"))
@@ -70,8 +92,8 @@ int main(int argc, char **argv)
     {
         std::cout << "AiQuant CLI (MVP)\n";
         std::cout << "Commands: \n";
-        std::cout << " backtest <ticks.csv>  [--cash N] [--qty N] [--fee N]\n";
-        std::cout << "    Resample M1 and run RSI+EMA strategy\n";
+        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N]\n";
+        std::cout << "    Resample candles and run RSI+EMA strategy\n";
         return 0;
     }
 

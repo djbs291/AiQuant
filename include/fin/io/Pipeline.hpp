@@ -35,4 +35,28 @@ namespace fin::io
         r.stats = src.stats();
         return r;
     }
+
+    // Generic timeframe version for CLI (MVP)
+    inline PipelineResult
+    resample_csv_with_stats(const std::string &path,
+                            Timeframe tf,
+                            const TickCsvOptions &opt = TickCsvOptions{})
+    {
+        FileTickSource src(path, opt);
+        TickToCandleResampler res(tf);
+
+        PipelineResult r{};
+        while (auto t = src.next())
+        {
+            if (auto c = res.update(*t))
+                r.candles.push_back(*c);
+        }
+        if (auto c = res.flush())
+            r.candles.push_back(*c);
+        
+        r.stats = src.stats();
+        return r;
+    }
+
+    // (duplicate removed)
 }
