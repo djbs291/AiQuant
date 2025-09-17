@@ -3,11 +3,28 @@
 #include <vector>
 #include <optional>
 #include <charconv>
+#include <fstream>
+#include <chrono>
 
 #include "fin/io/Pipeline.hpp"
 #include "fin/backtest/Backtester.hpp"
 
 using namespace fin;
+
+// Parse string flags (e.g. output paths)
+static std::optional<std::string> parse_string_flag(const std::vector<std::string> &args,
+                                                    const std::string &flag)
+{
+    for (std::size_t i = 1; i + 1 < args.size(); ++i)
+    {
+        if (args[i] == flag)
+        {
+            return args[i + 1];
+        }
+
+        return std::nullopt;
+    }
+}
 
 static std::optional<double> parse_double_flag(const std::vector<std::string> &args,
                                                const std::string &flag)
@@ -70,7 +87,7 @@ static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N]\n";
+        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--candles-out path]\n";
         return 2;
     }
 
@@ -116,7 +133,7 @@ int main(int argc, char **argv)
     {
         std::cout << "AiQuant CLI (MVP)\n";
         std::cout << "Commands: \n";
-        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N]\n";
+        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--candles-out path]\n";
         std::cout << "    Resample candles and run RSI+EMA strategy\n";
         return 0;
     }
