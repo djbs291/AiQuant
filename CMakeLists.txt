@@ -67,9 +67,16 @@ target_include_directories(fin_backtest PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inclu
 target_compile_features(fin_backtest PUBLIC cxx_std_20)
 target_link_libraries(fin_backtest PUBLIC fin_core fin_indicators fin_signal)
 
+# ============ ML Library ============
+file(GLOB_RECURSE ML_SRC "src/fin/ml/*.cpp")
+add_library(fin_ml STATIC ${ML_SRC})
+target_include_directories(fin_ml PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(fin_ml PUBLIC cxx_std_20)
+target_link_libraries(fin_ml PUBLIC fin_core fin_indicators)
+
 # ============ Main Executable ============
 add_executable(aiquant src/main.cpp)
-target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest)
+target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml)
 target_compile_features(aiquant PRIVATE cxx_std_20)
 
 # ============ Testing ============
@@ -120,7 +127,7 @@ if(Catch2_FOUND AND TEST_SOURCES)
     add_executable(aiquant_tests ${TEST_SOURCES})
 
     if(TARGET Catch2::Catch2WithMain)
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io fin_signal fin_backtest)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml)
 
         add_executable(test_io tests/io/test_tick_to_candle.cpp)
         target_link_libraries(test_io PRIVATE fin_io fin_core Catch2::Catch2WithMain)
@@ -135,7 +142,7 @@ if(Catch2_FOUND AND TEST_SOURCES)
 
         message(STATUS "Using Catch2 v3")
     else()
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io fin_signal fin_backtest)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml)
         message(STATUS "Using bundled or Catch2 v2")
     endif()
 
