@@ -1,7 +1,5 @@
 #include "fin/ml/FeatureVector.hpp"
-
 #include "fin/indicators/FeatureBus.hpp"
-
 #include <algorithm>
 
 namespace fin::ml

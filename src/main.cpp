@@ -5,10 +5,15 @@
 #include <charconv>
 #include <fstream>
 #include <chrono>
+#include <exception>
+#include <memory>
 
 #include "fin/io/Pipeline.hpp"
 #include "fin/backtest/Backtester.hpp"
 #include "fin/indicators/FeatureBus.hpp"
+#include "fin/signal/SignalEngine.hpp"
+#include "fin/ml/FeatureVector.hpp"
+#include "fin/ml/LinearModel.hpp"
 
 using namespace fin;
 
@@ -42,6 +47,17 @@ static std::optional<double> parse_double_flag(const std::vector<std::string> &a
         }
     }
     return std::nullopt;
+}
+
+// Presence-only flag (e.g., --no-ema-xover)
+static bool flag_present(const std::vector<std::string> &args, const std::string &flag)
+{
+    for (std::size_t i = 1; i < args.size(); ++i)
+    {
+        if (args[i] == flag)
+            return true;
+    }
+    return false;
 }
 
 static std::optional<std::size_t> parse_size_flag(const std::vector<std::string> &args,
@@ -87,7 +103,7 @@ static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--candles-out path]\n";
+        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
         return 2;
     }
 
@@ -110,11 +126,56 @@ static int cmd_backtest(const std::vector<std::string> &args)
         cfg.ema_slow = *v;
     if (auto v = parse_size_flag(args, "--rsi"))
         cfg.rsi_period = *v;
-    fin::signal::SignalEngine eng{}; // defaults
+
+    std::unique_ptr<fin::indicators::FeatureBus> feature_bus;
+    std::optional<fin::ml::LinearModel> linear_model;
+    if (auto model_path = parse_string_flag(args, "--model-linear"))
+    {
+        fin::ml::LinearModel loaded;
+        if (!loaded.load_from_file(*model_path))
+        {
+            std::cerr << "Failed to load linear model configuration: " << *model_path << "\n";
+        }
+        else
+        {
+            linear_model = std::move(loaded);
+            feature_bus = std::make_unique<fin::indicators::FeatureBus>(cfg.ema_fast, cfg.rsi_period);
+        }
+    }
+    // Signal config (MVP): RSI Thresholds and EMA crossover on/off
+    fin::signal::SignalEngineConfig scfg{}; // defaults: buy <= 30, sell >= 70, use EMA crossover
+    if (auto v = parse_double_flag(args, "--rsi_buy"))
+        scfg.rsi_buy_below = *v;
+    if (auto v = parse_double_flag(args, "--rsi-sell"))
+        scfg.rsi_sell_above = *v;
+    if (flag_present(args, "--no-ema-xover"))
+        scfg.use_ema_crossover = false;
+
+    fin::signal::SignalEngine eng{scfg}; // defaults
     fin::backtest::Backtester bt(cfg, eng);
 
     for (const auto &c : res.candles)
-        bt.on_candle(c);
+    {
+        std::optional<double> prediction;
+        if (feature_bus)
+        {
+            if (auto row = feature_bus->update(c))
+            {
+                auto fv = fin::ml::FeatureVector::from_feature_row(*row);
+                try
+                {
+                    if (linear_model)
+                        prediction = linear_model->predict(fv);
+                }
+                catch (const std::exception &ex)
+                {
+                    std::cerr << "Linear model prediction failed: " << ex.what() << "\n";
+                }
+            }
+        }
+
+        bt.on_candle(c, prediction);
+    }
     auto m = bt.finalize();
 
     std::cout << "Candles: " << res.candles.size() << "\n";
@@ -191,7 +252,7 @@ int main(int argc, char **argv)
     {
         std::cout << "AiQuant CLI (MVP)\n";
         std::cout << "Commands: \n";
-        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--candles-out path]\n";
+        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
         std::cout << "  features <ticks.csv> [--tf S1|S5|M1|M5|H1]\n";
         std::cout << "    Resample candles and run RSI+EMA strategy\n";
         return 0;

@@ -43,7 +43,7 @@ namespace fin::signal
             if (*prediction > 0)
             {
                 score += 0.5; // smaller weight for model by default
-                reason += "ML- ";
+                reason += "ML+ ";
             }
             else if (*prediction < 0)
             {
