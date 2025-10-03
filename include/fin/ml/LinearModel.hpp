@@ -43,6 +43,10 @@ namespace fin::ml
         // ...
         bool load_from_file(const std::string &path);
 
+        [[nodiscard]] double bias() const noexcept { return bias_; }
+        [[nodiscard]] const std::vector<double> &weights() const noexcept { return weights_; }
+        [[nodiscard]] const std::vector<std::pair<std::string, double>> &named_weights() const noexcept { return named_weights_; }
+
     private:
         double bias_ = 0.0;
         std::vector<double> weights_{};

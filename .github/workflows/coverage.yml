@@ -19,22 +19,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # No apt on some runners; fetch lcov scripts directly from GitHub releases
-      - name: Install lcov (no-apt)
+      - name: Install lcov
         run: |
           set -euo pipefail
-          # Pin to 1.16 to avoid extra Perl module deps present in newer releases
-          LCOV_VER=1.16
-          curl -sSL "https://github.com/linux-test-project/lcov/archive/refs/tags/v${LCOV_VER}.tar.gz" -o lcov.tgz
-          mkdir -p lcov-src
-          tar -xzf lcov.tgz -C lcov-src
-          LCOV_ROOT="$PWD/lcov-src/lcov-${LCOV_VER}"
-          LCOV_BIN="$LCOV_ROOT/bin"
-          # Make available in subsequent steps
-          echo "$LCOV_BIN" >> "$GITHUB_PATH"
-          # Also use it in this step
-          export PATH="$LCOV_BIN:$PATH"
-          echo "Added lcov to PATH: $LCOV_BIN"
+
+          if command -v lcov >/dev/null 2>&1; then
+            echo "lcov already available: $(lcov --version)"
+            exit 0
+          fi
+
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y lcov
+            lcov --version
+            exit 0
+          fi
+
+          LCOV_VERSION=1.16
+          : "${RUNNER_TEMP:=/tmp}"
+          ARCHIVE="$RUNNER_TEMP/lcov-${LCOV_VERSION}.tar.gz"
+          curl -sSL "https://github.com/linux-test-project/lcov/archive/refs/tags/v${LCOV_VERSION}.tar.gz" -o "$ARCHIVE"
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
+          LCOV_ROOT="$RUNNER_TEMP/lcov-${LCOV_VERSION}"
+          echo "${LCOV_ROOT}/bin" >> "$GITHUB_PATH"
+          export PATH="${LCOV_ROOT}/bin:$PATH"
           lcov --version
 
       - name: Configure (Coverage)
@@ -54,13 +62,18 @@ jobs:
 
       - name: Capture coverage
         run: |
-          # lcov 1.16 does not support --ignore-errors inconsistent
-          # Use only the rc knob to avoid unexecuted block noise.
+          # Drop test object coverage ahead of capture to avoid GCC 13 geninfo
+          # mismatched end-line errors (Catch2 registrars).
+          find build-cov -name '*.gcda' -path '*tests*' -delete
+
+          # lcov 1.16 lacks --ignore-errors inconsistent; rely on the rc knob
+          # and ignore unused exclusion patterns to stay compatible.
           lcov --rc geninfo_unexecuted_blocks=1 \
                --directory build-cov --capture --output-file coverage.info
           # filter out system & tests
           lcov --rc geninfo_unexecuted_blocks=1 \
-               --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
+               --remove coverage.info '/usr/*' '*/tests/*' \
+               --ignore-errors unused --output-file coverage.info
           # show summary
           lcov --rc geninfo_unexecuted_blocks=1 --list coverage.info
 

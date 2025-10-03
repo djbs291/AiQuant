@@ -128,7 +128,7 @@ public:
 ## **✅ External Integration**
 
 - **Python bindings** (via pybind11): `rsi(np.array)`, `predict(model, features)`
-- **CLI tool**: `./engine backtest data.csv --model mlp.json`
+- **CLI tool**: `aiquant features ticks.csv --tf M1`, `aiquant train-linear ticks.csv --out linear_model.csv`, `aiquant backtest ticks.csv --model-linear linear_model.csv`
 - **Optional HTTP endpoint**: `/predict`, `/signal`, `/health`
 
 ---

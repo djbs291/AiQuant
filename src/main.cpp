@@ -14,6 +14,7 @@
 #include "fin/signal/SignalEngine.hpp"
 #include "fin/ml/FeatureVector.hpp"
 #include "fin/ml/LinearModel.hpp"
+#include "fin/ml/LinearTrainer.hpp"
 
 using namespace fin;
 
@@ -103,7 +104,7 @@ static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
+        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
         return 2;
     }
 
@@ -126,6 +127,9 @@ static int cmd_backtest(const std::vector<std::string> &args)
         cfg.ema_slow = *v;
     if (auto v = parse_size_flag(args, "--rsi"))
         cfg.rsi_period = *v;
+    const std::size_t macd_fast = parse_size_flag(args, "--macd-fast").value_or(12);
+    const std::size_t macd_slow = parse_size_flag(args, "--macd-slow").value_or(26);
+    const std::size_t macd_signal = parse_size_flag(args, "--macd-signal").value_or(9);
 
     std::unique_ptr<fin::indicators::FeatureBus> feature_bus;
     std::optional<fin::ml::LinearModel> linear_model;
@@ -139,7 +143,7 @@ static int cmd_backtest(const std::vector<std::string> &args)
         else
         {
             linear_model = std::move(loaded);
-            feature_bus = std::make_unique<fin::indicators::FeatureBus>(cfg.ema_fast, cfg.rsi_period);
+            feature_bus = std::make_unique<fin::indicators::FeatureBus>(cfg.ema_fast, cfg.rsi_period, macd_fast, macd_slow, macd_signal);
         }
     }
     // Signal config (MVP): RSI Thresholds and EMA crossover on/off
@@ -211,12 +215,68 @@ static int cmd_backtest(const std::vector<std::string> &args)
     return 0;
 }
 
+static int cmd_train_linear(const std::vector<std::string> &args)
+{
+    if (args.empty())
+    {
+        std::cerr << "Usage: aiquant train-linear <ticks.csv> [--tf S1|S5|M1|M5|H1] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--out path]\n";
+        return 2;
+    }
+
+    const std::string path = args[0];
+    fin::io::TickCsvOptions opt{};
+    auto tf = parse_timeframe_flag(args);
+    auto res = fin::io::resample_csv_with_stats(path, tf, opt);
+
+    std::size_t ema_fast = parse_size_flag(args, "--ema-fast").value_or(12);
+    std::size_t rsi_period = parse_size_flag(args, "--rsi").value_or(14);
+    std::size_t macd_fast = parse_size_flag(args, "--macd-fast").value_or(12);
+    std::size_t macd_slow = parse_size_flag(args, "--macd-slow").value_or(26);
+    std::size_t macd_signal = parse_size_flag(args, "--macd-signal").value_or(9);
+
+    fin::indicators::FeatureBus fb(ema_fast, rsi_period, macd_fast, macd_slow, macd_signal);
+    std::vector<fin::indicators::FeatureRow> rows;
+    rows.reserve(res.candles.size());
+    for (const auto &c : res.candles)
+        if (auto row = fb.update(c))
+            rows.push_back(*row);
+
+    if (rows.size() < 2)
+    {
+        std::cerr << "Insufficient feature rows for training (need >= 2)." << std::endl;
+        return 1;
+    }
+    fin::ml::LinearTrainingOptions train_opt{};
+    fin::ml::LinearTrainingSummary summary{};
+    try
+    {
+        summary = fin::ml::train_linear_from_feature_rows(rows, train_opt);
+    }
+    catch (const std::exception &ex)
+    {
+        std::cerr << "Training failed: " << ex.what() << std::endl;
+        return 1;
+    }
+
+    const std::string out_path = parse_string_flag(args, "--out").value_or("linear_model.csv");
+    if (!fin::ml::save_linear_model(summary.model, out_path))
+    {
+        std::cerr << "Failed to write model to: " << out_path << std::endl;
+        return 1;
+    }
+
+    std::cout << "Samples: " << summary.samples << "\n";
+    std::cout << "Training MSE: " << summary.mse << "\n";
+    std::cout << "Saved linear model to: " << out_path << "\n";
+    return 0;
+}
+
 // MVP: emit features computed from resampled candles to stdou (CSV)
 static int cmd_features(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant features <ticks.csv> [--tf S1|S5|M1|M5|H1]\n";
+        std::cerr << "Usage: aiquant features <ticks.csv> [--tf S1|S5|M1|M5|H1] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N]\n";
         return 2;
     }
     const std::string path = args[0];
@@ -225,7 +285,13 @@ static int cmd_features(const std::vector<std::string> &args)
     auto tf = parse_timeframe_flag(args);
     auto res = fin::io::resample_csv_with_stats(path, tf, opt);
 
-    fin::indicators::FeatureBus fb; // defaults (EMA 12, RSI 14, MACD 12/26/9)
+    std::size_t ema_fast = parse_size_flag(args, "--ema-fast").value_or(12);
+    std::size_t rsi_period = parse_size_flag(args, "--rsi").value_or(14);
+    std::size_t macd_fast = parse_size_flag(args, "--macd-fast").value_or(12);
+    std::size_t macd_slow = parse_size_flag(args, "--macd-slow").value_or(26);
+    std::size_t macd_signal = parse_size_flag(args, "--macd-signal").value_or(9);
+
+    fin::indicators::FeatureBus fb(ema_fast, rsi_period, macd_fast, macd_slow, macd_signal);
 
     // Header
     std::cout << "Timestamp, close, ema_fast, rsi, macd, macd_signal, macd_hist\n";
@@ -252,9 +318,10 @@ int main(int argc, char **argv)
     {
         std::cout << "AiQuant CLI (MVP)\n";
         std::cout << "Commands: \n";
-        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
-        std::cout << "  features <ticks.csv> [--tf S1|S5|M1|M5|H1]\n";
+        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
+        std::cout << "  features <ticks.csv> [--tf S1|S5|M1|M5|H1] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N]\n";
         std::cout << "    Resample candles and run RSI+EMA strategy\n";
+        std::cout << "  train-linear <ticks.csv> [--tf ...] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--out path]\n";
         return 0;
     }
 
@@ -266,6 +333,10 @@ int main(int argc, char **argv)
     if (cmd == "features")
     {
         return cmd_features({args.begin() + 1, args.end()});
+    }
+    if (cmd == "train-linear")
+    {
+        return cmd_train_linear({args.begin() + 1, args.end()});
     }
 
     std::cerr << "Unknown command: " << cmd << "\n";
