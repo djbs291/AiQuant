@@ -74,9 +74,16 @@ target_include_directories(fin_ml PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(fin_ml PUBLIC cxx_std_20)
 target_link_libraries(fin_ml PUBLIC fin_core fin_indicators)
 
+# ============ Application Library ============
+file(GLOB_RECURSE APP_SRC "src/fin/app/*.cpp")
+add_library(fin_app STATIC ${APP_SRC})
+target_include_directories(fin_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(fin_app PUBLIC cxx_std_20)
+target_link_libraries(fin_app PUBLIC fin_io fin_backtest fin_ml fin_signal fin_indicators fin_core)
+
 # ============ Main Executable ============
 add_executable(aiquant src/main.cpp)
-target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml)
+target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app)
 target_compile_features(aiquant PRIVATE cxx_std_20)
 
 # ============ Testing ============
