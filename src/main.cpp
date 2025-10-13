@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
@@ -9,7 +11,6 @@
 #include <chrono>
 #include <exception>
 #include <memory>
-#include <tuple>
 
 #include "fin/io/Pipeline.hpp"
 #include "fin/backtest/Backtester.hpp"
@@ -18,6 +19,7 @@
 #include "fin/ml/FeatureVector.hpp"
 #include "fin/ml/LinearModel.hpp"
 #include "fin/ml/LinearTrainer.hpp"
+#include "fin/app/ScenarioRunner.hpp"
 
 using namespace fin;
 
@@ -82,21 +84,29 @@ static std::optional<std::size_t> parse_size_flag(const std::vector<std::string>
     return std::nullopt;
 }
 
+static std::optional<fin::io::Timeframe> parse_timeframe_token(const std::string &token)
+{
+    if (token == "S1")
+        return fin::io::Timeframe::S1;
+    if (token == "S5")
+        return fin::io::Timeframe::S5;
+    if (token == "M1")
+        return fin::io::Timeframe::M1;
+    if (token == "M5")
+        return fin::io::Timeframe::M5;
+    if (token == "H1")
+        return fin::io::Timeframe::H1;
+    return std::nullopt;
+}
+
 static fin::io::Timeframe parse_timeframe_flag(const std::vector<std::string> &args)
 {
     for (std::size_t i = 1; i + 1 < args.size(); ++i)
     {
         if (args[i] == "--tf")
         {
-            const std::string &tf = args[i + 1];
-            if (tf == "S1")
-                return fin::io::Timeframe::S1;
-            if (tf == "S5")
-                return fin::io::Timeframe::S5;
-            if (tf == "M5")
-                return fin::io::Timeframe::M5;
-            if (tf == "H1")
-                return fin::io::Timeframe::H1;
+            if (auto parsed = parse_timeframe_token(args[i + 1]))
+                return *parsed;
             return fin::io::Timeframe::M1;
         }
     }
@@ -314,177 +324,449 @@ static int cmd_features(const std::vector<std::string> &args)
     return 0;
 }
 
+static const char *timeframe_to_cstr(fin::io::Timeframe tf)
+{
+    switch (tf)
+    {
+    case fin::io::Timeframe::S1:
+        return "S1";
+    case fin::io::Timeframe::S5:
+        return "S5";
+    case fin::io::Timeframe::M5:
+        return "M5";
+    case fin::io::Timeframe::H1:
+        return "H1";
+    case fin::io::Timeframe::M1:
+    default:
+        return "M1";
+    }
+}
+
+static void trim_inplace(std::string &s)
+{
+    auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+    auto begin = std::find_if(s.begin(), s.end(), not_space);
+    if (begin == s.end())
+    {
+        s.clear();
+        return;
+    }
+
+    auto end = std::find_if(s.rbegin(), s.rend(), not_space).base();
+    s.assign(begin, end);
+}
+
+static std::optional<bool> parse_bool_value(const std::string &value)
+{
+    std::string token;
+    token.reserve(value.size());
+    for (char ch : value)
+    {
+        if (!std::isspace(static_cast<unsigned char>(ch)))
+            token.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+
+    if (token == "true" || token == "1" || token == "yes" || token == "on")
+        return true;
+    if (token == "false" || token == "0" || token == "no" || token == "off")
+        return false;
+    return std::nullopt;
+}
+
+static bool parse_double_value(const std::string &text, double &out)
+{
+    const char *begin = text.c_str();
+    const char *end = begin + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, out);
+    return ec == std::errc{} && ptr == end;
+}
+
+static bool parse_size_value(const std::string &text, std::size_t &out)
+{
+    const char *begin = text.c_str();
+    const char *end = begin + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, out);
+    return ec == std::errc{} && ptr == end;
+}
+
+static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result)
+{
+    std::cout << "=== MVP scenario ===\n";
+    std::cout << "Ticks: " << cfg.ticks_path << "\n";
+    std::cout << "Timeframe: " << timeframe_to_cstr(cfg.timeframe) << "\n";
+    std::cout << "Candles (post-resample): " << result.candles;
+    if (result.warmup_candles > 0)
+        std::cout << " (warmup " << result.warmup_candles << ")";
+    std::cout << "\n";
+    std::cout << "Feature rows: " << result.feature_rows << ", training samples: " << result.training.samples
+              << ", validation samples: " << result.validation_samples << "\n";
+    std::cout << "Train MSE: " << result.training.mse;
+    if (result.validation_samples > 0)
+        std::cout << ", validation RMSE: " << result.validation_rmse << "\n";
+    else
+        std::cout << ", validation RMSE: n/a\n";
+
+    const auto &named = result.training.model.named_weights();
+    if (!named.empty())
+    {
+        std::cout << "Model weights: \n";
+        for (const auto &[name, weight] : named)
+            std::cout << " " << name << ": " << weight << "\n";
+        std::cout << " bias: " << result.training.model.bias() << "\n";
+    }
+
+    if (!result.validation_preview.empty())
+    {
+        std::cout << "Validation preview (ts_ms, pred_delta, actual_delta):\n";
+        for (const auto &row : result.validation_preview)
+            std::cout << " " << row.ts_ms << ", " << row.predicted_delta << ", " << row.actual_delta << "\n";
+    }
+
+    std::cout << "Backtest final cash: " << result.metrics.final_cash << "\n";
+    std::cout << "PnL: " << result.metrics.pnl << " (" << result.metrics.return_pct << "%)\n";
+    std::cout << "Trades: " << result.metrics.trades << " (Wins: " << result.metrics.wins
+              << ", Losses: " << result.metrics.losses << ")\n";
+    std::cout << "Max DD: " << result.metrics.max_drawdown << "%\n";
+    if (result.model_saved && cfg.model_output_path)
+        std::cout << "Saved model: " << *cfg.model_output_path << "\n";
+}
+
+static bool load_scenario_file(const std::string &path, fin::app::ScenarioConfig &cfg, std::string &error)
+{
+    std::ifstream in(path);
+    if (!in)
+    {
+        error = "Failed to open scenario file: " + path;
+        return false;
+    }
+
+    std::string line;
+    std::size_t line_no = 0;
+    while (std::getline(in, line))
+    {
+        ++line_no;
+        trim_inplace(line);
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        auto comment_pos = line.find('#');
+        if (comment_pos != std::string::npos)
+        {
+            line.erase(comment_pos);
+            trim_inplace(line);
+            if (line.empty())
+                continue;
+        }
+
+        auto eq = line.find('=');
+        if (eq == std::string::npos)
+        {
+            error = "Invalid line " + std::to_string(line_no) + " (expected key=value)";
+            return false;
+        }
+
+        std::string key = line.substr(0, eq);
+        std::string value = line.substr(eq + 1);
+        trim_inplace(key);
+        trim_inplace(value);
+        if (key.empty())
+        {
+            error = "Missing key at line " + std::to_string(line_no);
+            return false;
+        }
+
+        std::string lowered(key.size(), '\0');
+        std::transform(key.begin(), key.end(), lowered.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+
+        if (lowered == "ticks" || lowered == "ticks_path" || lowered == "data")
+        {
+            cfg.ticks_path = value;
+        }
+        else if (lowered == "tf" || lowered == "timeframe")
+        {
+            if (auto tf = parse_timeframe_token(value))
+                cfg.timeframe = *tf;
+            else
+            {
+                error = "Unknown timeframe '" + value + "' at line " + std::to_string(line_no);
+                return false;
+            }
+        }
+        else if (lowered == "train_ratio")
+        {
+            double v = 0.0;
+            if (!parse_double_value(value, v))
+            {
+                error = "Invalid train_ratio at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.train_ratio = v;
+        }
+        else if (lowered == "ridge" || lowered == "ridge_lambda")
+        {
+            double v = 0.0;
+            if (!parse_double_value(value, v))
+            {
+                error = "Invalid ridge value at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.ridge_lambda = v;
+        }
+        else if (lowered == "ema_fast")
+        {
+            std::size_t v = 0;
+            if (!parse_size_value(value, v))
+            {
+                error = "Invalid ema_fast at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.ema_fast = v;
+        }
+        else if (lowered == "ema_slow")
+        {
+            std::size_t v = 0;
+            if (!parse_size_value(value, v))
+            {
+                error = "Invalid ema_slow at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.ema_slow = v;
+        }
+        else if (lowered == "rsi")
+        {
+            std::size_t v = 0;
+            if (!parse_size_value(value, v))
+            {
+                error = "Invalid rsi period at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.rsi_period = v;
+        }
+        else if (lowered == "macd_fast")
+        {
+            std::size_t v = 0;
+            if (!parse_size_value(value, v))
+            {
+                error = "Invalid macd_fast at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.macd_fast = v;
+        }
+        else if (lowered == "macd_slow")
+        {
+            std::size_t v = 0;
+            if (!parse_size_value(value, v))
+            {
+                error = "Invalid macd_slow at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.macd_slow = v;
+        }
+        else if (lowered == "macd_signal")
+        {
+            std::size_t v = 0;
+            if (!parse_size_value(value, v))
+            {
+                error = "Invalid macd_signal at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.macd_signal = v;
+        }
+        else if (lowered == "rsi_buy")
+        {
+            double v = 0.0;
+            if (!parse_double_value(value, v))
+            {
+                error = "Invalid rsi_buy at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.rsi_buy = v;
+        }
+        else if (lowered == "rsi_sell")
+        {
+            double v = 0.0;
+            if (!parse_double_value(value, v))
+            {
+                error = "Invalid rsi_sell at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.rsi_sell = v;
+        }
+        else if (lowered == "use_ema_crossover")
+        {
+            auto b = parse_bool_value(value);
+            if (!b)
+            {
+                error = "Invalid boolean for use_ema_crossover at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.use_ema_crossover = *b;
+        }
+        else if (lowered == "no_ema_xover")
+        {
+            auto b = parse_bool_value(value);
+            if (!b)
+            {
+                error = "Invalid boolean for no_ema_xover at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.use_ema_crossover = !*b;
+        }
+        else if (lowered == "cash" || lowered == "initial_cash")
+        {
+            double v = 0.0;
+            if (!parse_double_value(value, v))
+            {
+                error = "Invalid cash value at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.initial_cash = v;
+        }
+        else if (lowered == "qty" || lowered == "trade_qty")
+        {
+            double v = 0.0;
+            if (!parse_double_value(value, v))
+            {
+                error = "Invalid qty value at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.trade_qty = v;
+        }
+        else if (lowered == "fee" || lowered == "fee_per_trade")
+        {
+            double v = 0.0;
+            if (!parse_double_value(value, v))
+            {
+                error = "Invalid fee value at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.fee_per_trade = v;
+        }
+        else if (lowered == "model_out" || lowered == "model_output")
+        {
+            cfg.model_output_path = value;
+        }
+        else if (lowered == "preview" || lowered == "preview_limit")
+        {
+            std::size_t v = 0;
+            if (!parse_size_value(value, v))
+            {
+                error = "Invalid preview limit at line " + std::to_string(line_no);
+                return false;
+            }
+            cfg.validation_preview_limit = v;
+        }
+        else
+        {
+            // Unknown keys ignored for MVP.
+        }
+    }
+
+    if (cfg.ticks_path.empty())
+    {
+        error = "Scenario file missing 'ticks' path";
+        return false;
+    }
+
+    return true;
+}
+
 static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--model-out path]\n";
+        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--model-out path]\n";
         return 2;
     }
 
-    const std::string path = args[0];
-    fin::io::TickCsvOptions tick_opt{};
-    auto tf = parse_timeframe_flag(args);
-    auto res = fin::io::resample_csv_with_stats(path, tf, tick_opt);
+    fin::app::ScenarioConfig cfg{};
+    cfg.ticks_path = args[0];
+    cfg.timeframe = parse_timeframe_flag(args);
 
-    const std::size_t ema_fast = parse_size_flag(args, "--ema-fast").value_or(12);
-    const std::size_t ema_slow = parse_size_flag(args, "--ema-slow").value_or(26);
-    const std::size_t rsi_period = parse_size_flag(args, "--rsi").value_or(14);
-    const std::size_t macd_fast = parse_size_flag(args, "--macd-fast").value_or(12);
-    const std::size_t macd_slow = parse_size_flag(args, "--macd-slow").value_or(26);
-    const std::size_t macd_signal = parse_size_flag(args, "--macd-signal").value_or(9);
-
-    fin::indicators::FeatureBus feature_bus(ema_fast, rsi_period, macd_fast, macd_slow, macd_signal);
-    std::vector<fin::indicators::FeatureRow> rows;
-    rows.reserve(res.candles.size());
-    for (const auto &c : res.candles)
-    {
-        if (auto row = feature_bus.update(c))
-            rows.push_back(*row);
-    }
-
-    if (rows.size() < 3)
-    {
-        std::cerr << "Need at least 3 feature rows; got " << rows.size() << ". Insufficient data after indicator warmup.\n";
-        return 1;
-    }
-
-    double train_ratio = parse_double_flag(args, "--train-ratio").value_or(0.7);
-    if (train_ratio < 0.1)
-        train_ratio = 0.1;
-    if (train_ratio > 0.95)
-        train_ratio = 0.95;
-
-    std::size_t train_rows = static_cast<std::size_t>(train_ratio * static_cast<double>(rows.size()));
-    if (train_rows < 2)
-        train_rows = 2; // need at least two rows (one sample)
-    if (train_rows >= rows.size())
-        train_rows = rows.size() - 1;
-
-    auto train_end = rows.begin() + static_cast<std::vector<fin::indicators::FeatureRow>::difference_type>(train_rows + 1);
-    std::vector<fin::indicators::FeatureRow> training(rows.begin(), train_end);
-
-    fin::ml::LinearTrainingOptions train_opts{};
+    if (auto ratio = parse_double_flag(args, "--train-ratio"))
+        cfg.train_ratio = *ratio;
     if (auto ridge = parse_double_flag(args, "--ridge"))
-        train_opts.ridge_lambda = *ridge;
+        cfg.ridge_lambda = *ridge;
 
-    fin::ml::LinearTrainingSummary summary;
-    try
-    {
-        summary = fin::ml::train_linear_from_feature_rows(training, train_opts);
-    }
-    catch (const std::exception &ex)
-    {
-        std::cerr << "Training failed: " << ex.what() << "\n";
-        return 1;
-    }
+    if (auto v = parse_size_flag(args, "--ema-fast"))
+        cfg.ema_fast = *v;
+    if (auto v = parse_size_flag(args, "--ema-slow"))
+        cfg.ema_slow = *v;
+    if (auto v = parse_size_flag(args, "--rsi"))
+        cfg.rsi_period = *v;
+    if (auto v = parse_size_flag(args, "--macd-fast"))
+        cfg.macd_fast = *v;
+    if (auto v = parse_size_flag(args, "--macd-slow"))
+        cfg.macd_slow = *v;
+    if (auto v = parse_size_flag(args, "--macd-signal"))
+        cfg.macd_signal = *v;
+    if (auto v = parse_size_flag(args, "--preview"))
+        cfg.validation_preview_limit = *v;
 
-    std::size_t validation_samples = 0;
-    double validation_sse = 0.0;
-    std::vector<std::tuple<long long, double, double>> validation_preview;
-    for (std::size_t i = train_rows; i + 1 < rows.size(); ++i)
-    {
-        auto fv = fin::ml::FeatureVector::from_feature_row(rows[i]);
-        double pred = summary.model.predict(fv);
-        double target = rows[i + 1].close - rows[i].close;
-        double err = pred - target;
-        validation_sse += err * err;
-        ++validation_samples;
-
-        if (validation_preview.size() < 3)
-        {
-            using namespace std::chrono;
-            const long long ts_ms = duration_cast<milliseconds>(rows[i + 1].ts.time_since_epoch()).count();
-            validation_preview.emplace_back(ts_ms, pred, target);
-        }
-    }
-
-    if (auto out = parse_string_flag(args, "--model-out"))
-    {
-        if (!fin::ml::save_linear_model(summary.model, *out))
-            std::cerr << "Warning: failed to save trained model to '" << *out << "'\n";
-    }
-
-    fin::signal::SignalEngineConfig scfg{};
     if (auto v = parse_double_flag(args, "--rsi-buy"))
-        scfg.rsi_buy_below = *v;
-    if (auto v = parse_double_flag(args, "--rsi-sell"))
-        scfg.rsi_sell_above = *v;
-    if (flag_present(args, "--no-ema-xover"))
-        scfg.use_ema_crossover = false;
+        cfg.rsi_buy = *v;
+    else if (auto v_alt = parse_double_flag(args, "--rsi_buy"))
+        cfg.rsi_buy = *v_alt;
 
-    fin::backtest::BacktestConfig cfg{};
+    if (auto v = parse_double_flag(args, "--rsi-sell"))
+        cfg.rsi_sell = *v;
+    else if (auto v_alt = parse_double_flag(args, "--rsi_sell"))
+        cfg.rsi_sell = *v_alt;
+
+    cfg.use_ema_crossover = !flag_present(args, "--no-ema-xover");
+
     if (auto v = parse_double_flag(args, "--cash"))
         cfg.initial_cash = *v;
     if (auto v = parse_double_flag(args, "--qty"))
         cfg.trade_qty = *v;
     if (auto v = parse_double_flag(args, "--fee"))
         cfg.fee_per_trade = *v;
-    cfg.ema_fast = ema_fast;
-    cfg.ema_slow = ema_slow;
-    cfg.rsi_period = rsi_period;
 
-    fin::signal::SignalEngine engine{scfg};
-    fin::backtest::Backtester bt(cfg, engine);
+    if (auto out = parse_string_flag(args, "--model-out"))
+        cfg.model_output_path = *out;
 
-    fin::indicators::FeatureBus live_bus(ema_fast, rsi_period, macd_fast, macd_slow, macd_signal);
-    std::optional<double> pending_prediction;
-
-    const std::size_t warmup_candles = res.candles.size() - rows.size();
-    for (const auto &c : res.candles)
+    try
     {
-        bt.on_candle(c, pending_prediction);
+        auto result = fin::app::run_scenario(cfg);
+        print_scenario_result(cfg, result);
+        return 0;
+    }
+    catch (const std::exception &ex)
+    {
+        std::cerr << "run-mvp failed: " << ex.what() << "\n";
+        return 1;
+    }
+}
 
-        if (auto row = live_bus.update(c))
-        {
-            auto fv = fin::ml::FeatureVector::from_feature_row(*row);
-            pending_prediction = summary.model.predict(fv);
-        }
-        else
-        {
-            pending_prediction.reset();
-        }
+static int cmd_run_config(const std::vector<std::string> &args)
+{
+    if (args.empty())
+    {
+        std::cerr << "Usage: aiquant run-config <scenario.ini>\n";
+        return 2;
     }
 
-    auto metrics = bt.finalize();
-
-    std::cout << "=== MVP pipeline ===\n";
-    std::cout << "Candles (post-resample): " << res.candles.size() << "(warmup" << warmup_candles << ")\n";
-    std::cout << "Feature rows: " << rows.size() << ", training samples: " << summary.samples;
-    std::cout << ", validation samples: " << validation_samples << "\n";
-    std::cout << "Train MSE: " << summary.mse;
-    if (validation_samples > 0)
+    fin::app::ScenarioConfig cfg{};
+    std::string error;
+    if (!load_scenario_file(args[0], cfg, error))
     {
-        const double rmse = std::sqrt(validation_sse / static_cast<double>(validation_samples));
-        std::cout << ", validation RMSE: " << rmse << '\n';
-    }
-    else
-    {
-        std::cout << ", validation RMSE: n/a\n";
+        std::cerr << error << "\n";
+        return 1;
     }
 
-    const auto &named = summary.model.named_weights();
-    if (!named.empty())
+    try
     {
-        std::cout << "Model weights:\n";
-        for (const auto &[name, weight] : named)
-            std::cout << " " << name << ": " << weight << '\n';
-        std::cout << " bias: " << summary.model.bias() << '\n';
+        auto result = fin::app::run_scenario(cfg);
+        print_scenario_result(cfg, result);
+        return 0;
     }
-
-    if (!validation_preview.empty())
+    catch (const std::exception &ex)
     {
-        std::cout << "Validation preview (ts, pred_delta, actual_delta):\n";
-        for (const auto &[ts, pred, actual] : validation_preview)
-            std::cout << " " << ts << ", " << pred << ", " << actual << '\n';
+        std::cerr << "run-config failed: " << ex.what() << '\n';
+        return 1;
     }
-
-    std::cout << "Backtest final cash: " << metrics.final_cash << "\n";
-    std::cout << "PnL: " << metrics.pnl << " (" << metrics.return_pct << "%)\n";
-    std::cout << "Trades: " << metrics.trades << " (Wins: " << metrics.wins << ", Losses: " << metrics.losses << ")\n";
-    std::cout << "Max DD: " << metrics.max_drawdown << "%\n";
-
-    return 0;
 }
 
 int main(int argc, char **argv)
@@ -499,6 +781,8 @@ int main(int argc, char **argv)
         std::cout << "    Resample candles and run RSI+EMA strategy\n";
         std::cout << "  train-linear <ticks.csv> [--tf ...] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--out path]\n";
         std::cout << "  run-mvp <ticks.csv> [end-to-end training + signal backtest]\n";
+        std::cout << "  run-config <scenario.ini> [execute configuration-driven scenario]\n";
+
         return 0;
     }
 
@@ -518,6 +802,10 @@ int main(int argc, char **argv)
     if (cmd == "run-mvp")
     {
         return cmd_run_mvp({args.begin() + 1, args.end()});
+    }
+    if (cmd == "run-config")
+    {
+        return cmd_run_config({args.begin() + 1, args.end()});
     }
 
     std::cerr << "Unknown command: " << cmd << "\n";
