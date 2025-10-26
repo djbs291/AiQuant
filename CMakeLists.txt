@@ -93,6 +93,10 @@ add_executable(aiquant src/main.cpp)
 target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app fin_api)
 target_compile_features(aiquant PRIVATE cxx_std_20)
 
+add_executable(aiquant_http src/server/http_main.cpp)
+target_link_libraries(aiquant_http PRIVATE fin_api fin_app fin_io fin_core)
+target_compile_features(aiquant_http PRIVATE cxx_std_20)
+
 # ============ Python Bindings (optional) ============
 option(AIQUANT_BUILD_PYTHON "Build AiQuant python bindings" ON)
 

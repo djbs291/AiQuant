@@ -151,6 +151,13 @@ public:
 
 ---
 
+## **🚀 MVP Coverage**
+
+- **Presentation**: `aiquant` CLI plus the `aiquant_http` microservice (POST `/run-file` or `/run-config`).
+- **API**: `fin::api::ScenarioService` for native embedding and the optional `aiquant_api` Python module when pybind11 is available.
+
+---
+
 ## **📁 Suggested Folder Structure**
 
 ```

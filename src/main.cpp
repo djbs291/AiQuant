@@ -23,6 +23,7 @@
 #include "fin/app/ScenarioRunner.hpp"
 #include "fin/app/ScenarioConfigIO.hpp"
 #include "fin/app/ScenarioUtils.hpp"
+#include "fin/app/ScenarioSerialization.hpp"
 
 using namespace fin;
 
@@ -372,52 +373,6 @@ static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin
         std::cout << "Saved model: " << *cfg.model_output_path << "\n";
 }
 
-static void print_scenario_result_json(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result)
-{
-    std::cout << "{\n";
-    std::cout << "  \"ticks_path\": " << std::quoted(cfg.ticks_path) << ",\n";
-    std::cout << "  \"timeframe\": \"" << timeframe_to_cstr(cfg.timeframe) << "\",\n";
-    std::cout << "  \"candles\": " << result.candles << ",\n";
-    std::cout << "  \"warmup_candles\": " << result.warmup_candles << ",\n";
-    std::cout << "  \"feature_rows\": " << result.feature_rows << ",\n";
-    std::cout << "  \"training_samples\": " << result.training.samples << ",\n";
-    std::cout << "  \"validation_samples\": " << result.validation_samples << ",\n";
-    std::cout << "  \"training_mse\": " << result.training.mse << ",\n";
-    std::cout << "  \"validation_rmse\": " << result.validation_rmse << ",\n";
-    std::cout << "  \"pnl\": " << result.metrics.pnl << ",\n";
-    std::cout << "  \"return_pct\": " << result.metrics.return_pct << ",\n";
-    std::cout << "  \"trades\": " << result.metrics.trades << ",\n";
-    std::cout << "  \"wins\": " << result.metrics.wins << ",\n";
-    std::cout << "  \"losses\": " << result.metrics.losses << ",\n";
-    std::cout << "  \"max_drawdown\": " << result.metrics.max_drawdown << ",\n";
-    std::cout << "  \"model_saved\": " << std::boolalpha << result.model_saved << std::noboolalpha << ",\n";
-    std::cout << "  \"validation_preview\": [\n";
-    for (std::size_t i = 0; i < result.validation_preview.size(); ++i)
-    {
-        const auto &row = result.validation_preview[i];
-        std::cout << "    {\"ts_ms\": " << row.ts_ms
-                  << ", \"predicted\": " << row.predicted_delta
-                  << ", \"actual\": " << row.actual_delta << "}";
-        if (i + 1 < result.validation_preview.size())
-            std::cout << ',';
-        std::cout << "\n";
-    }
-    std::cout << "  ]\n";
-    std::cout << "}\n";
-}
-
-static bool write_validation_preview_csv(const fin::app::ScenarioResult &result, const std::string &path)
-{
-    std::ofstream out(path);
-    if (!out)
-        return false;
-
-    out << "ts_ms,predicted_delta,actual_delta\n";
-    for (const auto &row : result.validation_preview)
-        out << row.ts_ms << ',' << row.predicted_delta << ',' << row.actual_delta << '\n';
-    return true;
-}
-
 static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
@@ -480,8 +435,8 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
         auto result = fin::app::run_scenario(cfg);
         print_scenario_result(cfg, result);
         if (json_output)
-            print_scenario_result_json(cfg, result);
-        if (preview_out && !write_validation_preview_csv(result, *preview_out))
+            std::cout << fin::app::scenario_result_to_json(cfg, result);
+        if (preview_out && !fin::app::write_validation_preview_csv(result, *preview_out))
             std::cerr << "Failed to write validation preview to '" << *preview_out << "'\n";
         return 0;
     }
@@ -516,8 +471,8 @@ static int cmd_run_config(const std::vector<std::string> &args)
         auto result = fin::app::run_scenario(cfg);
         print_scenario_result(cfg, result);
         if (json_output)
-            print_scenario_result_json(cfg, result);
-        if (preview_out && !write_validation_preview_csv(result, *preview_out))
+            std::cout << fin::app::scenario_result_to_json(cfg, result);
+        if (preview_out && !fin::app::write_validation_preview_csv(result, *preview_out))
             std::cerr << "Failed to write validation preview to '" << *preview_out << "'\n";
         return 0;
     }
