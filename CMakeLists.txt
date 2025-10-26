@@ -132,9 +132,10 @@ file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp" "tests/*.cc" "tests/*.cxx")
 
 if(Catch2_FOUND AND TEST_SOURCES)
     add_executable(aiquant_tests ${TEST_SOURCES})
+    target_compile_definitions(aiquant_tests PRIVATE AIQUANT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
     if(TARGET Catch2::Catch2WithMain)
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app)
 
         add_executable(test_io tests/io/test_tick_to_candle.cpp)
         target_link_libraries(test_io PRIVATE fin_io fin_core Catch2::Catch2WithMain)
@@ -149,7 +150,7 @@ if(Catch2_FOUND AND TEST_SOURCES)
 
         message(STATUS "Using Catch2 v3")
     else()
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app)
         message(STATUS "Using bundled or Catch2 v2")
     endif()
 

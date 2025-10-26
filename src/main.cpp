@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <vector>
 #include <optional>
@@ -20,6 +21,8 @@
 #include "fin/ml/LinearModel.hpp"
 #include "fin/ml/LinearTrainer.hpp"
 #include "fin/app/ScenarioRunner.hpp"
+#include "fin/app/ScenarioConfigIO.hpp"
+#include "fin/app/ScenarioUtils.hpp"
 
 using namespace fin;
 
@@ -84,28 +87,13 @@ static std::optional<std::size_t> parse_size_flag(const std::vector<std::string>
     return std::nullopt;
 }
 
-static std::optional<fin::io::Timeframe> parse_timeframe_token(const std::string &token)
-{
-    if (token == "S1")
-        return fin::io::Timeframe::S1;
-    if (token == "S5")
-        return fin::io::Timeframe::S5;
-    if (token == "M1")
-        return fin::io::Timeframe::M1;
-    if (token == "M5")
-        return fin::io::Timeframe::M5;
-    if (token == "H1")
-        return fin::io::Timeframe::H1;
-    return std::nullopt;
-}
-
 static fin::io::Timeframe parse_timeframe_flag(const std::vector<std::string> &args)
 {
     for (std::size_t i = 1; i + 1 < args.size(); ++i)
     {
         if (args[i] == "--tf")
         {
-            if (auto parsed = parse_timeframe_token(args[i + 1]))
+            if (auto parsed = fin::app::parse_timeframe_token(args[i + 1]))
                 return *parsed;
             return fin::io::Timeframe::M1;
         }
@@ -342,53 +330,6 @@ static const char *timeframe_to_cstr(fin::io::Timeframe tf)
     }
 }
 
-static void trim_inplace(std::string &s)
-{
-    auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
-    auto begin = std::find_if(s.begin(), s.end(), not_space);
-    if (begin == s.end())
-    {
-        s.clear();
-        return;
-    }
-
-    auto end = std::find_if(s.rbegin(), s.rend(), not_space).base();
-    s.assign(begin, end);
-}
-
-static std::optional<bool> parse_bool_value(const std::string &value)
-{
-    std::string token;
-    token.reserve(value.size());
-    for (char ch : value)
-    {
-        if (!std::isspace(static_cast<unsigned char>(ch)))
-            token.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-    }
-
-    if (token == "true" || token == "1" || token == "yes" || token == "on")
-        return true;
-    if (token == "false" || token == "0" || token == "no" || token == "off")
-        return false;
-    return std::nullopt;
-}
-
-static bool parse_double_value(const std::string &text, double &out)
-{
-    const char *begin = text.c_str();
-    const char *end = begin + text.size();
-    auto [ptr, ec] = std::from_chars(begin, end, out);
-    return ec == std::errc{} && ptr == end;
-}
-
-static bool parse_size_value(const std::string &text, std::size_t &out)
-{
-    const char *begin = text.c_str();
-    const char *end = begin + text.size();
-    auto [ptr, ec] = std::from_chars(begin, end, out);
-    return ec == std::errc{} && ptr == end;
-}
-
 static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result)
 {
     std::cout << "=== MVP scenario ===\n";
@@ -431,245 +372,49 @@ static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin
         std::cout << "Saved model: " << *cfg.model_output_path << "\n";
 }
 
-static bool load_scenario_file(const std::string &path, fin::app::ScenarioConfig &cfg, std::string &error)
+static void print_scenario_result_json(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result)
 {
-    std::ifstream in(path);
-    if (!in)
+    std::cout << "{\n";
+    std::cout << "  \"ticks_path\": " << std::quoted(cfg.ticks_path) << ",\n";
+    std::cout << "  \"timeframe\": \"" << timeframe_to_cstr(cfg.timeframe) << "\",\n";
+    std::cout << "  \"candles\": " << result.candles << ",\n";
+    std::cout << "  \"warmup_candles\": " << result.warmup_candles << ",\n";
+    std::cout << "  \"feature_rows\": " << result.feature_rows << ",\n";
+    std::cout << "  \"training_samples\": " << result.training.samples << ",\n";
+    std::cout << "  \"validation_samples\": " << result.validation_samples << ",\n";
+    std::cout << "  \"training_mse\": " << result.training.mse << ",\n";
+    std::cout << "  \"validation_rmse\": " << result.validation_rmse << ",\n";
+    std::cout << "  \"pnl\": " << result.metrics.pnl << ",\n";
+    std::cout << "  \"return_pct\": " << result.metrics.return_pct << ",\n";
+    std::cout << "  \"trades\": " << result.metrics.trades << ",\n";
+    std::cout << "  \"wins\": " << result.metrics.wins << ",\n";
+    std::cout << "  \"losses\": " << result.metrics.losses << ",\n";
+    std::cout << "  \"max_drawdown\": " << result.metrics.max_drawdown << ",\n";
+    std::cout << "  \"model_saved\": " << std::boolalpha << result.model_saved << std::noboolalpha << ",\n";
+    std::cout << "  \"validation_preview\": [\n";
+    for (std::size_t i = 0; i < result.validation_preview.size(); ++i)
     {
-        error = "Failed to open scenario file: " + path;
+        const auto &row = result.validation_preview[i];
+        std::cout << "    {\"ts_ms\": " << row.ts_ms
+                  << ", \"predicted\": " << row.predicted_delta
+                  << ", \"actual\": " << row.actual_delta << "}";
+        if (i + 1 < result.validation_preview.size())
+            std::cout << ',';
+        std::cout << "\n";
+    }
+    std::cout << "  ]\n";
+    std::cout << "}\n";
+}
+
+static bool write_validation_preview_csv(const fin::app::ScenarioResult &result, const std::string &path)
+{
+    std::ofstream out(path);
+    if (!out)
         return false;
-    }
 
-    std::string line;
-    std::size_t line_no = 0;
-    while (std::getline(in, line))
-    {
-        ++line_no;
-        trim_inplace(line);
-        if (line.empty() || line[0] == '#')
-            continue;
-
-        auto comment_pos = line.find('#');
-        if (comment_pos != std::string::npos)
-        {
-            line.erase(comment_pos);
-            trim_inplace(line);
-            if (line.empty())
-                continue;
-        }
-
-        auto eq = line.find('=');
-        if (eq == std::string::npos)
-        {
-            error = "Invalid line " + std::to_string(line_no) + " (expected key=value)";
-            return false;
-        }
-
-        std::string key = line.substr(0, eq);
-        std::string value = line.substr(eq + 1);
-        trim_inplace(key);
-        trim_inplace(value);
-        if (key.empty())
-        {
-            error = "Missing key at line " + std::to_string(line_no);
-            return false;
-        }
-
-        std::string lowered(key.size(), '\0');
-        std::transform(key.begin(), key.end(), lowered.begin(), [](unsigned char ch) {
-            return static_cast<char>(std::tolower(ch));
-        });
-
-        if (lowered == "ticks" || lowered == "ticks_path" || lowered == "data")
-        {
-            cfg.ticks_path = value;
-        }
-        else if (lowered == "tf" || lowered == "timeframe")
-        {
-            if (auto tf = parse_timeframe_token(value))
-                cfg.timeframe = *tf;
-            else
-            {
-                error = "Unknown timeframe '" + value + "' at line " + std::to_string(line_no);
-                return false;
-            }
-        }
-        else if (lowered == "train_ratio")
-        {
-            double v = 0.0;
-            if (!parse_double_value(value, v))
-            {
-                error = "Invalid train_ratio at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.train_ratio = v;
-        }
-        else if (lowered == "ridge" || lowered == "ridge_lambda")
-        {
-            double v = 0.0;
-            if (!parse_double_value(value, v))
-            {
-                error = "Invalid ridge value at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.ridge_lambda = v;
-        }
-        else if (lowered == "ema_fast")
-        {
-            std::size_t v = 0;
-            if (!parse_size_value(value, v))
-            {
-                error = "Invalid ema_fast at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.ema_fast = v;
-        }
-        else if (lowered == "ema_slow")
-        {
-            std::size_t v = 0;
-            if (!parse_size_value(value, v))
-            {
-                error = "Invalid ema_slow at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.ema_slow = v;
-        }
-        else if (lowered == "rsi")
-        {
-            std::size_t v = 0;
-            if (!parse_size_value(value, v))
-            {
-                error = "Invalid rsi period at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.rsi_period = v;
-        }
-        else if (lowered == "macd_fast")
-        {
-            std::size_t v = 0;
-            if (!parse_size_value(value, v))
-            {
-                error = "Invalid macd_fast at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.macd_fast = v;
-        }
-        else if (lowered == "macd_slow")
-        {
-            std::size_t v = 0;
-            if (!parse_size_value(value, v))
-            {
-                error = "Invalid macd_slow at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.macd_slow = v;
-        }
-        else if (lowered == "macd_signal")
-        {
-            std::size_t v = 0;
-            if (!parse_size_value(value, v))
-            {
-                error = "Invalid macd_signal at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.macd_signal = v;
-        }
-        else if (lowered == "rsi_buy")
-        {
-            double v = 0.0;
-            if (!parse_double_value(value, v))
-            {
-                error = "Invalid rsi_buy at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.rsi_buy = v;
-        }
-        else if (lowered == "rsi_sell")
-        {
-            double v = 0.0;
-            if (!parse_double_value(value, v))
-            {
-                error = "Invalid rsi_sell at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.rsi_sell = v;
-        }
-        else if (lowered == "use_ema_crossover")
-        {
-            auto b = parse_bool_value(value);
-            if (!b)
-            {
-                error = "Invalid boolean for use_ema_crossover at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.use_ema_crossover = *b;
-        }
-        else if (lowered == "no_ema_xover")
-        {
-            auto b = parse_bool_value(value);
-            if (!b)
-            {
-                error = "Invalid boolean for no_ema_xover at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.use_ema_crossover = !*b;
-        }
-        else if (lowered == "cash" || lowered == "initial_cash")
-        {
-            double v = 0.0;
-            if (!parse_double_value(value, v))
-            {
-                error = "Invalid cash value at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.initial_cash = v;
-        }
-        else if (lowered == "qty" || lowered == "trade_qty")
-        {
-            double v = 0.0;
-            if (!parse_double_value(value, v))
-            {
-                error = "Invalid qty value at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.trade_qty = v;
-        }
-        else if (lowered == "fee" || lowered == "fee_per_trade")
-        {
-            double v = 0.0;
-            if (!parse_double_value(value, v))
-            {
-                error = "Invalid fee value at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.fee_per_trade = v;
-        }
-        else if (lowered == "model_out" || lowered == "model_output")
-        {
-            cfg.model_output_path = value;
-        }
-        else if (lowered == "preview" || lowered == "preview_limit")
-        {
-            std::size_t v = 0;
-            if (!parse_size_value(value, v))
-            {
-                error = "Invalid preview limit at line " + std::to_string(line_no);
-                return false;
-            }
-            cfg.validation_preview_limit = v;
-        }
-        else
-        {
-            // Unknown keys ignored for MVP.
-        }
-    }
-
-    if (cfg.ticks_path.empty())
-    {
-        error = "Scenario file missing 'ticks' path";
-        return false;
-    }
-
+    out << "ts_ms,predicted_delta,actual_delta\n";
+    for (const auto &row : result.validation_preview)
+        out << row.ts_ms << ',' << row.predicted_delta << ',' << row.actual_delta << '\n';
     return true;
 }
 
@@ -677,7 +422,7 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--model-out path]\n";
+        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--json]\n";
         return 2;
     }
 
@@ -727,10 +472,17 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
     if (auto out = parse_string_flag(args, "--model-out"))
         cfg.model_output_path = *out;
 
+    auto preview_out = parse_string_flag(args, "--preview-out");
+    bool json_output = flag_present(args, "--json");
+
     try
     {
         auto result = fin::app::run_scenario(cfg);
         print_scenario_result(cfg, result);
+        if (json_output)
+            print_scenario_result_json(cfg, result);
+        if (preview_out && !write_validation_preview_csv(result, *preview_out))
+            std::cerr << "Failed to write validation preview to '" << *preview_out << "'\n";
         return 0;
     }
     catch (const std::exception &ex)
@@ -744,9 +496,12 @@ static int cmd_run_config(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-config <scenario.ini>\n";
+        std::cerr << "Usage: aiquant run-config <scenario.ini> [--preview-out path] [--json]\n";
         return 2;
     }
+
+    auto preview_out = parse_string_flag(args, "--preview-out");
+    bool json_output = flag_present(args, "--json");
 
     fin::app::ScenarioConfig cfg{};
     std::string error;
@@ -760,6 +515,10 @@ static int cmd_run_config(const std::vector<std::string> &args)
     {
         auto result = fin::app::run_scenario(cfg);
         print_scenario_result(cfg, result);
+        if (json_output)
+            print_scenario_result_json(cfg, result);
+        if (preview_out && !write_validation_preview_csv(result, *preview_out))
+            std::cerr << "Failed to write validation preview to '" << *preview_out << "'\n";
         return 0;
     }
     catch (const std::exception &ex)
