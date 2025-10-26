@@ -81,10 +81,32 @@ target_include_directories(fin_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(fin_app PUBLIC cxx_std_20)
 target_link_libraries(fin_app PUBLIC fin_io fin_backtest fin_ml fin_signal fin_indicators fin_core)
 
+# ============ API Library ============
+file(GLOB_RECURSE API_SRC "src/fin/api/*.cpp")
+add_library(fin_api STATIC ${API_SRC})
+target_include_directories(fin_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(fin_api PUBLIC cxx_std_20)
+target_link_libraries(fin_api PUBLIC fin_app)
+
 # ============ Main Executable ============
 add_executable(aiquant src/main.cpp)
-target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app)
+target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app fin_api)
 target_compile_features(aiquant PRIVATE cxx_std_20)
+
+# ============ Python Bindings (optional) ============
+option(AIQUANT_BUILD_PYTHON "Build AiQuant python bindings" ON)
+
+if(AIQUANT_BUILD_PYTHON)
+    find_package(pybind11 CONFIG QUIET)
+    if(pybind11_FOUND)
+        pybind11_add_module(aiquant_api MODULE bindings/python/aiquant_module.cpp)
+        target_link_libraries(aiquant_api PRIVATE fin_api)
+        target_compile_features(aiquant_api PRIVATE cxx_std_20)
+        set_target_properties(aiquant_api PROPERTIES OUTPUT_NAME "aiquant_api")
+    else()
+        message(STATUS "pybind11 not found; python bindings disabled")
+    endif()
+endif()
 
 # ============ Testing ============
 enable_testing()
@@ -135,7 +157,7 @@ if(Catch2_FOUND AND TEST_SOURCES)
     target_compile_definitions(aiquant_tests PRIVATE AIQUANT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
     if(TARGET Catch2::Catch2WithMain)
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app fin_api)
 
         add_executable(test_io tests/io/test_tick_to_candle.cpp)
         target_link_libraries(test_io PRIVATE fin_io fin_core Catch2::Catch2WithMain)
@@ -150,7 +172,7 @@ if(Catch2_FOUND AND TEST_SOURCES)
 
         message(STATUS "Using Catch2 v3")
     else()
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app fin_api)
         message(STATUS "Using bundled or Catch2 v2")
     endif()
 

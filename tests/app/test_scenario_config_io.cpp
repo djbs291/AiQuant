@@ -1,45 +1,12 @@
 #include "catch2_compat.hpp"
 
-#include <chrono>
-#include <filesystem>
-#include <fstream>
-#include <string_view>
-
 #include "fin/app/ScenarioConfigIO.hpp"
 #include "fin/app/ScenarioRunner.hpp"
-
-namespace
-{
-    std::filesystem::path write_temp_config(std::string_view contents)
-    {
-        const auto ts = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        auto path = std::filesystem::temp_directory_path() / ("aiquant_scenario_" + std::to_string(ts) + ".ini");
-        std::ofstream out(path);
-        out << contents;
-        return path;
-    }
-
-    std::filesystem::path write_temp_ticks_csv(std::size_t rows)
-    {
-        const auto ts = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        auto path = std::filesystem::temp_directory_path() / ("aiquant_ticks_" + std::to_string(ts) + ".csv");
-        std::ofstream out(path);
-        out << "Timestamp,symbol,price,volume\n";
-        long long base_ts = 1693492800000LL;
-        for (std::size_t i = 0; i < rows; ++i)
-        {
-            const long long row_ts = base_ts + static_cast<long long>(i) * 60000;
-            const double price = 100.0 + static_cast<double>(i % 10) * 0.5;
-            const double volume = 1.0 + static_cast<double>(i % 5);
-            out << row_ts << ",TEST," << price << ',' << volume << '\n';
-        }
-        return path;
-    }
-}
+#include "app/TestScenarioHelpers.hpp"
 
 TEST_CASE("load_scenario_file parses canonical config", "[scenario][config]")
 {
-    auto path = write_temp_config(R"(
+    auto path = scenario_test::write_temp_config(R"(
         # Comment line
         ticks = sample.csv
         tf = M5
@@ -69,7 +36,7 @@ TEST_CASE("load_scenario_file parses canonical config", "[scenario][config]")
 
 TEST_CASE("load_scenario_file detects invalid booleans", "[scenario][config]")
 {
-    auto path = write_temp_config("ticks=data.csv\nuse_ema_crossover = maybe\n");
+    auto path = scenario_test::write_temp_config("ticks=data.csv\nuse_ema_crossover = maybe\n");
     fin::app::ScenarioConfig cfg{};
     std::string error;
     REQUIRE_FALSE(fin::app::load_scenario_file(path.string(), cfg, error));
@@ -79,7 +46,7 @@ TEST_CASE("load_scenario_file detects invalid booleans", "[scenario][config]")
 
 TEST_CASE("load_scenario_file requires ticks path", "[scenario][config]")
 {
-    auto path = write_temp_config("tf = M1\n");
+    auto path = scenario_test::write_temp_config("tf = M1\n");
     fin::app::ScenarioConfig cfg{};
     std::string error;
     REQUIRE_FALSE(fin::app::load_scenario_file(path.string(), cfg, error));
@@ -89,7 +56,7 @@ TEST_CASE("load_scenario_file requires ticks path", "[scenario][config]")
 
 TEST_CASE("run_scenario executes on synthetic CSV", "[scenario][runner]")
 {
-    const auto ticks = write_temp_ticks_csv(200);
+    const auto ticks = scenario_test::write_temp_ticks_csv(200);
 
     fin::app::ScenarioConfig cfg{};
     cfg.ticks_path = ticks.string();
