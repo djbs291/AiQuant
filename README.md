@@ -4,12 +4,12 @@ The MVP CLI can execute full scenarios via `aiquant run-config`. The supported k
 
 ## C++ / Python API
 
-The `fin::api::ScenarioService` offers a stable programmatic entry point for running scenarios. Link against the `fin_api` static library and call `ScenarioService::run` or `ScenarioService::run_file`. Optional Python bindings are built when `pybind11` is available:
+The `fin::api::ScenarioService` offers a stable programmatic entry point for running scenarios. Link against the `fin_api` static library and call `ScenarioService::run` or `ScenarioService::run_file`. Python bindings are built with the CPython C-API (no pybind11 dependency). Build + import example:
 
 ```
 cmake -DAIQUANT_BUILD_PYTHON=ON -S . -B build
-cmake --build build
-python -c "import aiquant_api as aq; svc=aq.ScenarioService(); cfg=aq.ScenarioConfig(); cfg.ticks_path='ticks_sample.csv'; print(svc.run_config(cfg)['metrics'])"
+cmake --build build --target aiquant_api
+python -c "import aiquant_api as aq; cfg={'ticks_path':'ticks_sample.csv'}; print(aq.run_config(cfg)['metrics'])"
 ```
 
 ## HTTP Microservice

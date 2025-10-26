@@ -17,7 +17,7 @@ This document defines the architecture of a high-performance financial AI engine
 | Layer | Responsibility |
 | --- | --- |
 | Presentation | CLI tool, HTTP microservice, dashboards |
-| API | C++ public API and Python bindings (via pybind11) |
+| API | C++ public API and Python bindings (native CPython module) |
 | Application | Signal orchestration, backtesting engine |
 | Processing | Technical indicators, AI models, feature engineering |
 | Data | CSV/JSON readers, tick streamers, resampling to OHLCV |
@@ -127,7 +127,7 @@ public:
 
 ## **✅ External Integration**
 
-- **Python bindings** (via pybind11): `rsi(np.array)`, `predict(model, features)`
+- **Python bindings**: native CPython module exposing scenario runner
 - **CLI tool**: `aiquant features ticks.csv --tf M1`, `aiquant train-linear ticks.csv --out linear_model.csv`, `aiquant backtest ticks.csv --model-linear linear_model.csv`
 - **Optional HTTP endpoint**: `/predict`, `/signal`, `/health`
 
@@ -154,7 +154,7 @@ public:
 ## **🚀 MVP Coverage**
 
 - **Presentation**: `aiquant` CLI plus the `aiquant_http` microservice (POST `/run-file` or `/run-config`).
-- **API**: `fin::api::ScenarioService` for native embedding and the optional `aiquant_api` Python module when pybind11 is available.
+- **API**: `fin::api::ScenarioService` for native embedding and the optional `aiquant_api` Python module (built without external dependencies).
 
 ---
 

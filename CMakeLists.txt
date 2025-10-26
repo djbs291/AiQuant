@@ -7,6 +7,8 @@ project(AiQuant
     LANGUAGES CXX
 )
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # Set C++ Standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -101,15 +103,18 @@ target_compile_features(aiquant_http PRIVATE cxx_std_20)
 option(AIQUANT_BUILD_PYTHON "Build AiQuant python bindings" ON)
 
 if(AIQUANT_BUILD_PYTHON)
-    find_package(pybind11 CONFIG QUIET)
-    if(pybind11_FOUND)
-        pybind11_add_module(aiquant_api MODULE bindings/python/aiquant_module.cpp)
-        target_link_libraries(aiquant_api PRIVATE fin_api)
-        target_compile_features(aiquant_api PRIVATE cxx_std_20)
-        set_target_properties(aiquant_api PROPERTIES OUTPUT_NAME "aiquant_api")
-    else()
-        message(STATUS "pybind11 not found; python bindings disabled")
+    find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+    add_library(aiquant_api MODULE bindings/python/aiquant_module.cpp)
+    target_include_directories(aiquant_api PRIVATE ${Python3_INCLUDE_DIRS})
+    target_link_libraries(aiquant_api PRIVATE fin_api ${Python3_LIBRARIES})
+    target_compile_features(aiquant_api PRIVATE cxx_std_20)
+    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import sysconfig;print(sysconfig.get_config_var('EXT_SUFFIX') or '.so')"
+                    OUTPUT_VARIABLE PY_EXT_SUFFIX
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT PY_EXT_SUFFIX)
+        set(PY_EXT_SUFFIX ".so")
     endif()
+    set_target_properties(aiquant_api PROPERTIES PREFIX "" SUFFIX "${PY_EXT_SUFFIX}")
 endif()
 
 # ============ Testing ============
