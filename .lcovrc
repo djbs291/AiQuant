@@ -1,0 +1,2 @@
+# Configuration for lcov to ignore mismatched end line errors
+geninfo_ignore_errors = mismatch
