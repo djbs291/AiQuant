@@ -1,10 +1,12 @@
-#include <Python.h>
-
 #include <optional>
 #include <string>
 #include <unordered_map>
 
+#include <pybind11/pybind11.h>
+
 #include "fin/api/ScenarioService.hpp"
+
+namespace py = pybind11;
 
 namespace
 {
@@ -39,148 +41,124 @@ namespace
         return it == map.end() ? std::nullopt : std::optional<fin::io::Timeframe>(it->second);
     }
 
-    void dict_set(PyObject *dict, const char *key, PyObject *value)
+    py::object get_if_present(const py::dict &dict, const char *name, bool *present = nullptr)
     {
-        PyDict_SetItemString(dict, key, value);
-        Py_DECREF(value);
-    }
-
-    PyObject *scenario_result_to_dict(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result)
-    {
-        PyObject *root = PyDict_New();
-        dict_set(root, "ticks_path", PyUnicode_FromString(cfg.ticks_path.c_str()));
-        dict_set(root, "timeframe", PyUnicode_FromString(timeframe_to_str(cfg.timeframe)));
-        dict_set(root, "candles", PyLong_FromUnsignedLongLong(result.candles));
-        dict_set(root, "warmup_candles", PyLong_FromUnsignedLongLong(result.warmup_candles));
-        dict_set(root, "feature_rows", PyLong_FromUnsignedLongLong(result.feature_rows));
-        dict_set(root, "training_samples", PyLong_FromUnsignedLongLong(result.training.samples));
-        dict_set(root, "validation_samples", PyLong_FromUnsignedLongLong(result.validation_samples));
-        dict_set(root, "training_mse", PyFloat_FromDouble(result.training.mse));
-        dict_set(root, "validation_rmse", PyFloat_FromDouble(result.validation_rmse));
-        Py_INCREF(result.model_saved ? Py_True : Py_False);
-        PyDict_SetItemString(root, "model_saved", result.model_saved ? Py_True : Py_False);
-
-        PyObject *metrics = PyDict_New();
-        dict_set(metrics, "final_cash", PyFloat_FromDouble(result.metrics.final_cash));
-        dict_set(metrics, "pnl", PyFloat_FromDouble(result.metrics.pnl));
-        dict_set(metrics, "return_pct", PyFloat_FromDouble(result.metrics.return_pct));
-        dict_set(metrics, "trades", PyLong_FromUnsignedLongLong(result.metrics.trades));
-        dict_set(metrics, "wins", PyLong_FromUnsignedLongLong(result.metrics.wins));
-        dict_set(metrics, "losses", PyLong_FromUnsignedLongLong(result.metrics.losses));
-        dict_set(metrics, "max_drawdown", PyFloat_FromDouble(result.metrics.max_drawdown));
-        PyDict_SetItemString(root, "metrics", metrics);
-        Py_DECREF(metrics);
-
-        PyObject *preview = PyList_New(result.validation_preview.size());
-        for (std::size_t i = 0; i < result.validation_preview.size(); ++i)
+        py::str key(name);
+        if (!dict.contains(key))
         {
-            const auto &row = result.validation_preview[i];
-            PyObject *entry = PyDict_New();
-            dict_set(entry, "ts_ms", PyLong_FromLongLong(row.ts_ms));
-            dict_set(entry, "predicted_delta", PyFloat_FromDouble(row.predicted_delta));
-            dict_set(entry, "actual_delta", PyFloat_FromDouble(row.actual_delta));
-            PyList_SET_ITEM(preview, i, entry);
+            if (present)
+                *present = false;
+            return py::none();
         }
-        PyDict_SetItemString(root, "validation_preview", preview);
-        Py_DECREF(preview);
-        return root;
+        if (present)
+            *present = true;
+        return dict[key];
     }
 
-    bool set_double(PyObject *dict, const char *name, double &target, std::string &error)
+    bool set_double(const py::dict &dict, const char *name, double &target, std::string &error)
     {
-        PyObject *value = PyDict_GetItemString(dict, name);
-        if (!value)
+        bool present = false;
+        py::object value = get_if_present(dict, name, &present);
+        if (!present)
             return true;
-        double v = PyFloat_AsDouble(value);
-        if (PyErr_Occurred())
+        try
+        {
+            target = value.cast<double>();
+            return true;
+        }
+        catch (const py::cast_error &)
         {
             error = std::string("Invalid numeric value for ") + name;
-            PyErr_Clear();
             return false;
         }
-        target = v;
-        return true;
     }
 
-    bool set_size(PyObject *dict, const char *name, std::size_t &target, std::string &error)
+    bool set_size(const py::dict &dict, const char *name, std::size_t &target, std::string &error)
     {
-        PyObject *value = PyDict_GetItemString(dict, name);
-        if (!value)
+        bool present = false;
+        py::object value = get_if_present(dict, name, &present);
+        if (!present)
             return true;
-        long long v = PyLong_AsLongLong(value);
-        if (PyErr_Occurred() || v < 0)
+        try
+        {
+            long long v = value.cast<long long>();
+            if (v < 0)
+            {
+                error = std::string("Invalid integer value for ") + name;
+                return false;
+            }
+            target = static_cast<std::size_t>(v);
+            return true;
+        }
+        catch (const py::cast_error &)
         {
             error = std::string("Invalid integer value for ") + name;
-            PyErr_Clear();
             return false;
         }
-        target = static_cast<std::size_t>(v);
-        return true;
     }
 
-    bool set_bool(PyObject *dict, const char *name, bool &target, std::string &error)
+    bool set_bool(const py::dict &dict, const char *name, bool &target, std::string &error)
     {
-        PyObject *value = PyDict_GetItemString(dict, name);
-        if (!value)
+        bool present = false;
+        py::object value = get_if_present(dict, name, &present);
+        if (!present)
             return true;
-        int truth = PyObject_IsTrue(value);
-        if (truth == -1)
+        try
+        {
+            target = value.cast<bool>();
+            return true;
+        }
+        catch (const py::cast_error &)
         {
             error = std::string("Invalid boolean for ") + name;
-            PyErr_Clear();
             return false;
         }
-        target = truth != 0;
-        return true;
     }
 
-    bool set_optional_double(PyObject *dict, const char *name, std::optional<double> &target, std::string &error)
+    bool set_optional_double(const py::dict &dict, const char *name, std::optional<double> &target, std::string &error)
     {
-        PyObject *value = PyDict_GetItemString(dict, name);
-        if (!value)
+        bool present = false;
+        py::object value = get_if_present(dict, name, &present);
+        if (!present)
             return true;
-        if (value == Py_None)
+        if (value.is_none())
         {
             target.reset();
             return true;
         }
-        double v = PyFloat_AsDouble(value);
-        if (PyErr_Occurred())
+        try
+        {
+            target = value.cast<double>();
+            return true;
+        }
+        catch (const py::cast_error &)
         {
             error = std::string("Invalid numeric value for ") + name;
-            PyErr_Clear();
             return false;
         }
-        target = v;
-        return true;
     }
 
-    bool mapping_to_config(PyObject *dict, fin::app::ScenarioConfig &cfg, std::string &error)
+    bool mapping_to_config(const py::dict &dict, fin::app::ScenarioConfig &cfg, std::string &error)
     {
-        if (!dict || !PyDict_Check(dict))
+        bool present = false;
+        if (py::object ticks = get_if_present(dict, "ticks_path", &present); present)
         {
-            error = "Scenario config must be a dict";
-            return false;
-        }
-
-        if (PyObject *ticks = PyDict_GetItemString(dict, "ticks_path"))
-        {
-            if (!PyUnicode_Check(ticks))
+            if (!py::isinstance<py::str>(ticks))
             {
                 error = "ticks_path must be a string";
                 return false;
             }
-            cfg.ticks_path = PyUnicode_AsUTF8(ticks);
+            cfg.ticks_path = ticks.cast<std::string>();
         }
 
-        if (PyObject *tf = PyDict_GetItemString(dict, "timeframe"))
+        if (py::object tf = get_if_present(dict, "timeframe", &present); present)
         {
-            if (!PyUnicode_Check(tf))
+            if (!py::isinstance<py::str>(tf))
             {
                 error = "timeframe must be string";
                 return false;
             }
-            std::string token = PyUnicode_AsUTF8(tf);
+            std::string token = tf.cast<std::string>();
             if (auto parsed = parse_timeframe(token))
                 cfg.timeframe = *parsed;
             else
@@ -206,133 +184,126 @@ namespace
         if (!set_optional_double(dict, "fee_per_trade", cfg.fee_per_trade, error)) return false;
         if (!set_size(dict, "validation_preview_limit", cfg.validation_preview_limit, error)) return false;
 
-        if (PyObject *model = PyDict_GetItemString(dict, "model_output_path"))
+        if (py::object model = get_if_present(dict, "model_output_path", &present); present)
         {
-            if (model == Py_None)
+            if (model.is_none())
+            {
                 cfg.model_output_path.reset();
-            else if (PyUnicode_Check(model))
-                cfg.model_output_path = PyUnicode_AsUTF8(model);
+            }
+            else if (py::isinstance<py::str>(model))
+            {
+                cfg.model_output_path = model.cast<std::string>();
+            }
             else
             {
                 error = "model_output_path must be string";
                 return false;
             }
         }
+
         return true;
     }
 
-    PyObject *config_to_dict(const fin::app::ScenarioConfig &cfg)
+    py::dict scenario_result_to_dict(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result)
     {
-        PyObject *dict = PyDict_New();
-        dict_set(dict, "ticks_path", PyUnicode_FromString(cfg.ticks_path.c_str()));
-        dict_set(dict, "timeframe", PyUnicode_FromString(timeframe_to_str(cfg.timeframe)));
-        dict_set(dict, "train_ratio", PyFloat_FromDouble(cfg.train_ratio));
-        dict_set(dict, "ridge_lambda", PyFloat_FromDouble(cfg.ridge_lambda));
-        dict_set(dict, "ema_fast", PyLong_FromUnsignedLongLong(cfg.ema_fast));
-        dict_set(dict, "ema_slow", PyLong_FromUnsignedLongLong(cfg.ema_slow));
-        dict_set(dict, "rsi_period", PyLong_FromUnsignedLongLong(cfg.rsi_period));
-        dict_set(dict, "macd_fast", PyLong_FromUnsignedLongLong(cfg.macd_fast));
-        dict_set(dict, "macd_slow", PyLong_FromUnsignedLongLong(cfg.macd_slow));
-        dict_set(dict, "macd_signal", PyLong_FromUnsignedLongLong(cfg.macd_signal));
-        dict_set(dict, "rsi_buy", PyFloat_FromDouble(cfg.rsi_buy));
-        dict_set(dict, "rsi_sell", PyFloat_FromDouble(cfg.rsi_sell));
-        Py_INCREF(cfg.use_ema_crossover ? Py_True : Py_False);
-        PyDict_SetItemString(dict, "use_ema_crossover", cfg.use_ema_crossover ? Py_True : Py_False);
+        py::dict root;
+        root["ticks_path"] = cfg.ticks_path;
+        root["timeframe"] = timeframe_to_str(cfg.timeframe);
+        root["candles"] = result.candles;
+        root["warmup_candles"] = result.warmup_candles;
+        root["feature_rows"] = result.feature_rows;
+        root["training_samples"] = result.training.samples;
+        root["validation_samples"] = result.validation_samples;
+        root["training_mse"] = result.training.mse;
+        root["validation_rmse"] = result.validation_rmse;
+        root["model_saved"] = result.model_saved;
+
+        py::dict metrics;
+        metrics["final_cash"] = result.metrics.final_cash;
+        metrics["pnl"] = result.metrics.pnl;
+        metrics["return_pct"] = result.metrics.return_pct;
+        metrics["trades"] = result.metrics.trades;
+        metrics["wins"] = result.metrics.wins;
+        metrics["losses"] = result.metrics.losses;
+        metrics["max_drawdown"] = result.metrics.max_drawdown;
+        root["metrics"] = std::move(metrics);
+
+        py::list preview;
+        for (const auto &row : result.validation_preview)
+        {
+            py::dict entry;
+            entry["ts_ms"] = row.ts_ms;
+            entry["predicted_delta"] = row.predicted_delta;
+            entry["actual_delta"] = row.actual_delta;
+            preview.append(std::move(entry));
+        }
+        root["validation_preview"] = std::move(preview);
+        return root;
+    }
+
+    py::dict config_to_dict(const fin::app::ScenarioConfig &cfg)
+    {
+        py::dict dict;
+        dict["ticks_path"] = cfg.ticks_path;
+        dict["timeframe"] = timeframe_to_str(cfg.timeframe);
+        dict["train_ratio"] = cfg.train_ratio;
+        dict["ridge_lambda"] = cfg.ridge_lambda;
+        dict["ema_fast"] = cfg.ema_fast;
+        dict["ema_slow"] = cfg.ema_slow;
+        dict["rsi_period"] = cfg.rsi_period;
+        dict["macd_fast"] = cfg.macd_fast;
+        dict["macd_slow"] = cfg.macd_slow;
+        dict["macd_signal"] = cfg.macd_signal;
+        dict["rsi_buy"] = cfg.rsi_buy;
+        dict["rsi_sell"] = cfg.rsi_sell;
+        dict["use_ema_crossover"] = cfg.use_ema_crossover;
         if (cfg.initial_cash)
-            dict_set(dict, "initial_cash", PyFloat_FromDouble(*cfg.initial_cash));
+            dict["initial_cash"] = *cfg.initial_cash;
         if (cfg.trade_qty)
-            dict_set(dict, "trade_qty", PyFloat_FromDouble(*cfg.trade_qty));
+            dict["trade_qty"] = *cfg.trade_qty;
         if (cfg.fee_per_trade)
-            dict_set(dict, "fee_per_trade", PyFloat_FromDouble(*cfg.fee_per_trade));
-        dict_set(dict, "validation_preview_limit", PyLong_FromUnsignedLongLong(cfg.validation_preview_limit));
+            dict["fee_per_trade"] = *cfg.fee_per_trade;
+        dict["validation_preview_limit"] = cfg.validation_preview_limit;
         if (cfg.model_output_path)
-            dict_set(dict, "model_output_path", PyUnicode_FromString(cfg.model_output_path->c_str()));
+            dict["model_output_path"] = *cfg.model_output_path;
         return dict;
     }
 
-    PyObject *py_run_file(PyObject *, PyObject *args)
+    py::dict run_file(const std::string &path)
     {
-        const char *path = nullptr;
-        if (!PyArg_ParseTuple(args, "s", &path))
-            return nullptr;
-        try
-        {
-            auto cfg = service().load_file(path);
-            auto result = service().run(cfg);
-            return scenario_result_to_dict(cfg, result);
-        }
-        catch (const std::exception &ex)
-        {
-            PyErr_SetString(PyExc_RuntimeError, ex.what());
-            return nullptr;
-        }
+        auto cfg = service().load_file(path);
+        auto result = service().run(cfg);
+        return scenario_result_to_dict(cfg, result);
     }
 
-    PyObject *py_load_file(PyObject *, PyObject *args)
+    py::dict load_file(const std::string &path)
     {
-        const char *path = nullptr;
-        if (!PyArg_ParseTuple(args, "s", &path))
-            return nullptr;
-        try
-        {
-            auto cfg = service().load_file(path);
-            return config_to_dict(cfg);
-        }
-        catch (const std::exception &ex)
-        {
-            PyErr_SetString(PyExc_RuntimeError, ex.what());
-            return nullptr;
-        }
+        auto cfg = service().load_file(path);
+        return config_to_dict(cfg);
     }
 
-    PyObject *py_run_config(PyObject *, PyObject *args, PyObject *kwargs)
+    py::dict run_config(py::object cfg_obj)
     {
-        PyObject *cfg_dict = nullptr;
-        static const char *kwlist[] = {"config", nullptr};
-        if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O", const_cast<char **>(kwlist), &cfg_dict))
-            return nullptr;
+        if (!py::isinstance<py::dict>(cfg_obj))
+            throw py::value_error("config must be dict");
 
+        auto cfg_dict = cfg_obj.cast<py::dict>();
         fin::app::ScenarioConfig cfg{};
         std::string error;
         if (!mapping_to_config(cfg_dict, cfg, error))
-        {
-            PyErr_SetString(PyExc_ValueError, error.c_str());
-            return nullptr;
-        }
+            throw py::value_error(error);
         if (cfg.ticks_path.empty())
-        {
-            PyErr_SetString(PyExc_ValueError, "config dict missing ticks_path");
-            return nullptr;
-        }
+            throw py::value_error("config dict missing ticks_path");
 
-        try
-        {
-            auto result = service().run(cfg);
-            return scenario_result_to_dict(cfg, result);
-        }
-        catch (const std::exception &ex)
-        {
-            PyErr_SetString(PyExc_RuntimeError, ex.what());
-            return nullptr;
-        }
+        auto result = service().run(cfg);
+        return scenario_result_to_dict(cfg, result);
     }
 }
 
-static PyMethodDef AiQuantMethods[] = {
-    {"run_file", py_run_file, METH_VARARGS, "Run a scenario defined in a file"},
-    {"run_config", reinterpret_cast<PyCFunction>(py_run_config), METH_VARARGS | METH_KEYWORDS, "Run from dictionary config"},
-    {"load_file", py_load_file, METH_VARARGS, "Load scenario.ini into a dict"},
-    {nullptr, nullptr, 0, nullptr}};
-
-static struct PyModuleDef aiquant_module = {
-    PyModuleDef_HEAD_INIT,
-    "aiquant_api",
-    "AiQuant Python bindings",
-    -1,
-    AiQuantMethods};
-
-PyMODINIT_FUNC PyInit_aiquant_api(void)
+PYBIND11_MODULE(aiquant_api, m)
 {
-    return PyModule_Create(&aiquant_module);
+    m.doc() = "AiQuant Python bindings";
+    m.def("run_file", &run_file, py::arg("path"), "Run a scenario defined in a file");
+    m.def("load_file", &load_file, py::arg("path"), "Load scenario.ini into a dict");
+    m.def("run_config", &run_config, py::arg("config"), "Run from dictionary config");
 }
-

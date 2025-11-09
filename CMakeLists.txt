@@ -104,13 +104,30 @@ option(AIQUANT_BUILD_PYTHON "Build AiQuant python bindings" ON)
 
 if(AIQUANT_BUILD_PYTHON)
     find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+    find_package(pybind11 CONFIG QUIET)
+    if(NOT pybind11_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -m pybind11 --cmakedir
+            OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
+            RESULT_VARIABLE PYBIND11_CMAKE_RESULT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(PYBIND11_CMAKE_RESULT EQUAL 0 AND PYBIND11_CMAKE_DIR)
+            list(APPEND CMAKE_PREFIX_PATH ${PYBIND11_CMAKE_DIR})
+            find_package(pybind11 CONFIG QUIET)
+        endif()
+    endif()
+    if(NOT pybind11_FOUND)
+        message(FATAL_ERROR "pybind11 not found; install pybind11 (pip install pybind11) or configure -DAIQUANT_BUILD_PYTHON=OFF to skip Python bindings.")
+    endif()
     add_library(aiquant_api MODULE bindings/python/aiquant_module.cpp)
-    target_include_directories(aiquant_api PRIVATE ${Python3_INCLUDE_DIRS})
-    target_link_libraries(aiquant_api PRIVATE fin_api ${Python3_LIBRARIES})
+    target_link_libraries(aiquant_api PRIVATE fin_api pybind11::module Python3::Python)
     target_compile_features(aiquant_api PRIVATE cxx_std_20)
-    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import sysconfig;print(sysconfig.get_config_var('EXT_SUFFIX') or '.so')"
-                    OUTPUT_VARIABLE PY_EXT_SUFFIX
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig;print(sysconfig.get_config_var('EXT_SUFFIX') or '.so')"
+        OUTPUT_VARIABLE PY_EXT_SUFFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
     if(NOT PY_EXT_SUFFIX)
         set(PY_EXT_SUFFIX ".so")
     endif()
