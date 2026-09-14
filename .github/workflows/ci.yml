@@ -40,6 +40,12 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Python module smoke test
+        run: |
+          # Use the interpreter CMake built the module against (ABI must match).
+          PY=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' build/CMakeCache.txt)
+          PYTHONPATH=build "${PY:-python3}" tests/python/smoke_test.py
+
       - name: Upload test logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
