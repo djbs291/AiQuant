@@ -1,6 +1,6 @@
 # Scenario Config Format
 
-`aiquant run-config` consumes an INI-like text file processed by `load_scenario_file` (see `src/main.cpp`). Lines look like:
+`aiquant run-config` consumes an INI-like text file processed by `load_scenario_file` (see `src/fin/app/ScenarioConfigIO.cpp`). Lines look like:
 
 ```
 key = value  # optional inline comment
@@ -41,4 +41,10 @@ Boolean fields accept the tokens `true/false`, `1/0`, `yes/no`, and `on/off` (ca
 
 ## Example
 
-See `scenarios/mvp.ini` for a ready-to-run configuration wired up to the sample CSVs shipped in the repo.
+See `scenarios/mvp.ini` for a ready-to-run configuration. It points at `scenarios/ticks_mvp.csv`, a synthetic 300-tick file that is long enough to clear indicator warmup:
+
+```bash
+./build/aiquant run-config scenarios/mvp.ini
+```
+
+Run it from the repo root, since relative paths in the INI are resolved from the working directory.
