@@ -1,0 +1,62 @@
+name: Branch cleanup
+
+# GitHub deletes the head branch automatically when a PR is merged through the
+# UI or `gh pr merge` (repo setting "Automatically delete head branches").
+# This job is the safety net for merges pushed straight from a clone: it deletes
+# remote branches whose tip is already contained in main.
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 4 * * 1'   # Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  delete-merged-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete branches already merged into main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          # Heads of open PRs are kept even when they look merged.
+          gh pr list --state open --json headRefName --jq '.[].headRefName' | sort -u > /tmp/open_heads
+
+          gh api "repos/$REPO/branches" --paginate \
+            --jq '.[] | select(.protected == false) | .name' | sort -u > /tmp/branches
+
+          while read -r branch; do
+            [ -n "$branch" ] || continue
+            if [ "$branch" = "$DEFAULT_BRANCH" ]; then
+              continue
+            fi
+            if grep -qxF "$branch" /tmp/open_heads; then
+              echo "skip $branch (open PR)"
+              continue
+            fi
+            if ! git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+              echo "skip $branch (no local ref)"
+              continue
+            fi
+            if git merge-base --is-ancestor "refs/remotes/origin/$branch" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+              sha=$(git rev-parse --short "refs/remotes/origin/$branch")
+              echo "delete $branch ($sha, merged into $DEFAULT_BRANCH)"
+              gh api -X DELETE "repos/$REPO/git/refs/heads/$branch"
+            else
+              echo "keep $branch (not merged)"
+            fi
+          done < /tmp/branches

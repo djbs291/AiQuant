@@ -92,3 +92,9 @@ GitHub Actions runs on Ubuntu only:
 - `release.yml`: on `v*.*.*` tags, packages `build-rel` as a tarball.
 
 Because `AIQUANT_BUILD_PYTHON` defaults to `ON` and configure fails without pybind11, every workflow must install `pybind11-dev` and `python3-dev` via apt (PR #11). Any new workflow that configures the project needs the same step, or `-DAIQUANT_BUILD_PYTHON=OFF`.
+
+## Branch and PR hygiene
+
+- The repo has **"Automatically delete head branches"** enabled, so merging a PR through the GitHub UI or `gh pr merge` deletes the head branch and closes the PR. Prefer `gh pr merge <n> --squash --delete-branch`.
+- `.github/workflows/branch-cleanup.yml` is the safety net for merges pushed straight from a clone: on every push to `main`, weekly, or on demand, it deletes unprotected remote branches whose tip is already an ancestor of `main`. It skips `main` and the head branch of any open PR.
+- A PR whose head branch is deleted is closed automatically by GitHub, so stale branches and stale PRs are cleaned up by the same mechanism.
