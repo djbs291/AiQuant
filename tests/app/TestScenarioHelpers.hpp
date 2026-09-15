@@ -1,18 +1,17 @@
 #pragma once
 
-#include <chrono>
+#include "TestTempFiles.hpp"
+
 #include <filesystem>
 #include <fstream>
-#include <random>
+#include <string>
 #include <string_view>
 
 namespace scenario_test
 {
     inline std::filesystem::path temp_path(const std::string &prefix, const std::string &suffix)
     {
-        const auto ts = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        std::string filename = prefix + std::to_string(ts) + suffix;
-        return std::filesystem::temp_directory_path() / filename;
+        return test_files::temp_path(prefix, suffix);
     }
 
     inline std::filesystem::path write_temp_config(std::string_view contents)

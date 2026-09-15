@@ -1,12 +1,6 @@
 #include "catch2_compat.hpp"
-#include <fstream>
-#include <sstream>
+#include "TestTempFiles.hpp"
 #include <chrono>
-#if !defined(_WIN32)
-#include <unistd.h>
-#else
-#include <windows.h>
-#endif
 
 #include "fin/io/Pipeline.hpp"
 #include "fin/core/Candle.hpp"
@@ -20,30 +14,20 @@ static long long to_epoch_ms(fin::core::Timestamp ts)
 
 TEST_CASE("CSV ticks -> M1 candles (OHLCV correct, boundary + EOF flush)", "[io][pipeline]")
 {
-    // Create a tiny tick CSV in the current working dir of the test.
-    // Use a per-process unique filename to avoid collisions when tests run in parallel.
-    std::ostringstream oss;
-#if defined(_WIN32)
-    oss << "ticks_sample_pipeline_" << GetCurrentProcessId() << ".csv";
-#else
-    oss << "ticks_sample_pipeline_" << getpid() << ".csv";
-#endif
-    const std::string path = oss.str();
-    {
-        std::ofstream f(path);
-        f << "Timestamp,symbol,price,volume\n";
-        // All UTC epoch-ms
-        // Minute 12:00
-        f << "1693492800000,ABC,100.0,1\n"; // open=100
-        f << "1693492803000,ABC,101.5,2\n"; // high=101.5
-        f << "1693492805000,ABC,99.0,3\n";  // low=99.0 (note: leading space to exercise trim)
-        // Boundary tick at exactly 12:01 -> rolls first candle
-        f << " 1693492860000,ABC,102.0,4\n"; // second candle (single tick)
-    }
+    // Tiny tick CSV in a unique temp file. All UTC epoch-ms.
+    const test_files::TempFile fixture("aiquant_ticks_pipeline_", ".csv",
+                                       "Timestamp,symbol,price,volume\n"
+                                       // Minute 12:00
+                                       "1693492800000,ABC,100.0,1\n" // open=100
+                                       "1693492803000,ABC,101.5,2\n" // high=101.5
+                                       "1693492805000,ABC,99.0,3\n"  // low=99.0
+                                       // Boundary tick at exactly 12:01 -> rolls first candle.
+                                       // Leading space exercises the trim.
+                                       " 1693492860000,ABC,102.0,4\n"); // second candle (single tick)
 
     fin::io::TickCsvOptions opt{};
     // opt.has_header = true; opt.delimiter = ','; // defaults are fine
-    auto res = fin::io::resample_csv_m1_with_stats(path, opt);
+    auto res = fin::io::resample_csv_m1_with_stats(fixture.string(), opt);
     const auto &out = res.candles;
 
     REQUIRE(out.size() == 2);

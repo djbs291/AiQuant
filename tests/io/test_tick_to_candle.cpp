@@ -1,6 +1,6 @@
 // tests/io/test_tick_to_candle.cpp
 #include "catch2_compat.hpp"
-#include <fstream>
+#include "TestTempFiles.hpp"
 #include <vector>
 
 #include "fin/io/Sources.hpp"
@@ -12,19 +12,16 @@ using namespace fin;
 
 TEST_CASE("Tick -> 1m candle resampling (EOF flush, boundary roll)", "[io][resampler]")
 {
-    const char *path = "ticks_sample.csv";
-    {
-        std::ofstream f(path);
-        f << "Timestamp,symbol,price,volume\n";
-        // 12:00:00.xxx to 12:00:59.xxx (same minute)
-        f << "1693492800000,ABC,100.0,1\n";
-        f << "1693492803000,ABC,101.5,2\n";
-        f << "1693492805000,ABC,99.0,3\n";
-        // next minute -> should emit the first candle
-        f << "1693492860000,ABC,102.0,4\n"; // 12:01:00 (boundary roll)
-    }
+    const test_files::TempFile fixture("aiquant_ticks_sample_", ".csv",
+                                       "Timestamp,symbol,price,volume\n"
+                                       // 12:00:00.xxx to 12:00:59.xxx (same minute)
+                                       "1693492800000,ABC,100.0,1\n"
+                                       "1693492803000,ABC,101.5,2\n"
+                                       "1693492805000,ABC,99.0,3\n"
+                                       // next minute -> should emit the first candle
+                                       "1693492860000,ABC,102.0,4\n"); // 12:01:00 (boundary roll)
 
-    io::FileTickSource src(path, {});
+    io::FileTickSource src(fixture.string(), {});
     io::TickToCandleResampler res(io::Timeframe::M1);
 
     std::vector<core::Candle> out;
