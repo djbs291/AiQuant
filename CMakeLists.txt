@@ -92,11 +92,12 @@ target_link_libraries(fin_api PUBLIC fin_app)
 
 # ============ Main Executable ============
 add_executable(aiquant src/main.cpp)
-target_link_libraries(aiquant PRIVATE fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app fin_api)
+# fin_api pulls in fin_app and, transitively, every other library (all PUBLIC deps).
+target_link_libraries(aiquant PRIVATE fin_api)
 target_compile_features(aiquant PRIVATE cxx_std_20)
 
 add_executable(aiquant_http src/server/http_main.cpp)
-target_link_libraries(aiquant_http PRIVATE fin_api fin_app fin_io fin_core)
+target_link_libraries(aiquant_http PRIVATE fin_api)
 target_compile_features(aiquant_http PRIVATE cxx_std_20)
 
 # ============ Python Bindings (optional) ============
@@ -183,14 +184,14 @@ if(Catch2_FOUND AND TEST_SOURCES)
     target_compile_definitions(aiquant_tests PRIVATE AIQUANT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
     if(TARGET Catch2::Catch2WithMain)
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app fin_api)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_api)
 
         add_executable(test_io tests/io/test_tick_to_candle.cpp)
-        target_link_libraries(test_io PRIVATE fin_io fin_core Catch2::Catch2WithMain)
+        target_link_libraries(test_io PRIVATE fin_io Catch2::Catch2WithMain)
         add_executable(test_resampler tests/io/test_resampler.cpp)
-        target_link_libraries(test_resampler PRIVATE fin_io fin_core Catch2::Catch2WithMain)
+        target_link_libraries(test_resampler PRIVATE fin_io Catch2::Catch2WithMain)
         add_executable(test_pipeline tests/io/test_pipeline_tick_csv_to_candles.cpp)
-        target_link_libraries(test_pipeline PRIVATE fin_io fin_core Catch2::Catch2WithMain)
+        target_link_libraries(test_pipeline PRIVATE fin_io Catch2::Catch2WithMain)
 
         target_include_directories(test_io PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
         target_include_directories(test_resampler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -198,7 +199,7 @@ if(Catch2_FOUND AND TEST_SOURCES)
 
         message(STATUS "Using Catch2 v3")
     else()
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_core fin_indicators fin_io fin_signal fin_backtest fin_ml fin_app fin_api)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_api)
         message(STATUS "Using bundled or Catch2 v2")
     endif()
 
