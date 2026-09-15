@@ -62,18 +62,19 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 3. **`run-mvp --json` and `run-config --json` are not machine-readable:** the human-readable report is printed to stdout before the JSON, so the output can't be piped into `jq`. The HTTP and Python paths are unaffected.
 4. **Test harness limitations:**
    - Tests use a bundled 95-line "minicatch" (`tests/catch2/catch.hpp`), so filtering by tag or name is not possible and there is no `SECTION`.
-   - Several tests write CSV fixtures into the current working directory.
-   - The committed root files `ticks_sample.csv`, `ticks_features.csv` and `ticks_sample_pipeline.csv` are copies of those generated fixtures, and running the tests from the repo root rewrites them.
-5. **Documentation drift:**
-   - `README.md` and `docs/ScenarioConfig.md` point to `scenarios/mvp.ini`, which does not exist.
-   - `docs/ScenarioConfig.md` says the INI parser is in `src/main.cpp`; it is in `src/fin/app/ScenarioConfigIO.cpp`.
-   - `docs/CppFinancialAIEngine.md` says the Python module has no external dependencies; it requires pybind11. Its module map uses `ind/`, `py/`, `examples/` and diagram images that don't exist.
-   - The layer docs link to external Notion pages for per-indicator designs.
-   - `README.md` has no project introduction or build/test instructions.
+   - ~~Several tests write CSV fixtures into the current working directory.~~ Fixed 2026-09-16: fixtures go to the system temp dir via `tests/TestTempFiles.hpp` and are removed on scope exit.
+   - ~~The committed root files `ticks_sample.csv`, `ticks_features.csv` and `ticks_sample_pipeline.csv` are copies of those generated fixtures, and running the tests from the repo root rewrites them.~~ Deleted 2026-09-16; `/ticks_*.csv` is now ignored.
+5. **Documentation drift.** Fixed 2026-09-16, except the Notion links:
+   - ~~`README.md` and `docs/ScenarioConfig.md` point to `scenarios/mvp.ini`, which does not exist.~~ `scenarios/mvp.ini` and `scenarios/ticks_mvp.csv` (300 synthetic ticks) are now in the repo.
+   - ~~`docs/ScenarioConfig.md` says the INI parser is in `src/main.cpp`~~; it points to `src/fin/app/ScenarioConfigIO.cpp`.
+   - ~~`docs/CppFinancialAIEngine.md` says the Python module has no external dependencies~~; the pybind11 requirement, the module map and the folder structure now match the repo, and the broken diagram attachment is gone.
+   - The layer docs link to external Notion pages for per-indicator designs. **Still open** — the content is not in the repo.
+   - ~~`README.md` has no project introduction or build/test instructions.~~ Rewritten with an overview and build/test/CLI/API/HTTP sections.
+   - ~~The README `curl` example posts the INI *contents* to `/run-file`, which expects a *path* and answers `Failed to open scenario file`.~~ Fixed 2026-09-16: `/run-file` gets the path, `/run-config` gets the contents.
 
 ### Low
-6. The linker reports duplicate static libraries because the executable targets repeat the full library list even though the dependencies are already `PUBLIC`.
-7. `.gitignore` ignores `.vscode/`, but `.vscode/tasks.json` (a generic g++ single-file task) is committed.
+6. ~~The linker reports duplicate static libraries because the executable targets repeat the full library list even though the dependencies are already `PUBLIC`.~~ Fixed 2026-09-16: the executables and the test binary link `fin_api` only; the warnings are gone.
+7. ~~`.gitignore` ignores `.vscode/`, but `.vscode/tasks.json` (a generic g++ single-file task) is committed.~~ Removed 2026-09-16; the file was a single-file g++ task unrelated to the CMake build.
 8. `ci.yml` runs `apt-get install` before `apt-get update` and builds lcov without using it. `release.yml` tars the whole build directory for Linux x86_64 only.
 9. Seven stale, unmerged `codex/*` branches (CI/lcov experiments from 2025-09) remain on the remote.
 10. `IModel::fit` / `partial_fit` default to throwing `logic_error`. Training happens only through the free function `train_linear_from_feature_rows`, and there is no online learning.
@@ -86,11 +87,11 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 - ✅ Add a CI step that exercises the built `aiquant_api` module. `ci.yml` now runs `tests/python/smoke_test.py`: import, `run_config` / `load_file` / `run_file` on a synthetic 300-tick CSV, and the `ValueError` / `RuntimeError` error paths.
 
 ### P1: quick fixes and repo hygiene
-- Add `scenarios/mvp.ini` (it needs a tick file large enough to get past warmup, ≥ ~40 candles with default periods), or fix the references.
-- Correct the doc drift listed in §5.5 and add a short build/test/usage intro to `README.md`.
-- Make tests write fixtures to a temporary directory, delete the generated CSVs from the repo root, and ignore them.
-- Delete the stale `codex/*` branches; either remove `.vscode/tasks.json` or stop ignoring `.vscode/`.
-- Simplify `target_link_libraries` on the executables to rely on transitive `PUBLIC` dependencies.
+- ✅ Add `scenarios/mvp.ini` plus `scenarios/ticks_mvp.csv` (300 synthetic ticks, enough to clear warmup).
+- ✅ Correct the doc drift listed in §5.5 (except the Notion links) and add a build/test/usage intro to `README.md`.
+- ✅ Make tests write fixtures to a temporary directory, delete the generated CSVs from the repo root, and ignore them.
+- ✅ Remove `.vscode/tasks.json`. ⬜ Delete the stale `codex/*` branches and close PRs #7, #8 and #10 (needs a maintainer decision).
+- ✅ Simplify `target_link_libraries` on the executables to rely on transitive `PUBLIC` dependencies.
 
 ### P2: hardening and test infrastructure
 - Make `--json` emit only JSON on stdout (send the report to stderr or drop it when `--json` is given).

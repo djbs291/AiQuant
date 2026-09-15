@@ -38,13 +38,13 @@ PYTHONPATH=build python3 -c "import aiquant_api as aq; print(aq.run_config({'tic
 PYTHONPATH=build python3 tests/python/smoke_test.py   # module smoke test, also run by ci.yml (not by ctest)
 ```
 
-A scenario needs enough candles to get through indicator warmup (about 33 with default periods, plus at least 3 feature rows). The 3–7 row `ticks_*.csv` files at the repo root are too small for `run-mvp`/`run-config`.
+A scenario needs enough candles to get through indicator warmup (about 33 with default periods, plus at least 3 feature rows). `scenarios/mvp.ini` and its `scenarios/ticks_mvp.csv` (300 synthetic ticks) are the ready-to-run example; run them from the repo root, since INI paths resolve against the working directory.
 
 ## Testing gotchas
 
 - The tests use a **bundled 95-line "minicatch"** (`tests/catch2/catch.hpp`) unless a real Catch2 is installed. It has a plain `int main()` that ignores arguments, so **tag and name filters don't work**: `aiquant_tests "[rsi]"` still runs everything. It supports only `TEST_CASE`, `REQUIRE`, `REQUIRE_FALSE` and `Approx(...).margin()`; there is no `SECTION`. Always include `"catch2_compat.hpp"` so the same test sources also compile against real Catch2 v2/v3.
 - If a system Catch2 v3 is found, `CMakeLists.txt` takes a different path: it links `Catch2WithMain` and adds the extra `test_io` / `test_resampler` / `test_pipeline` executables. That path was not exercised locally.
-- Several tests write CSV fixtures (`ticks_sample.csv`, `ticks_features.csv`, `ticks_sample_pipeline_<pid>.csv`) into the **current working directory**. `ctest` runs them inside `build/`. Running `aiquant_tests` from the repo root overwrites the committed root CSVs and leaves untracked files behind.
+- Tests that need a file on disk use `tests/TestTempFiles.hpp` (`test_files::TempFile`), which writes to the system temp dir and deletes the file on scope exit. Keep new tests on that helper: writing into the current working directory pollutes the repo when `aiquant_tests` is run from the root.
 - Sources and tests are collected with `file(GLOB_RECURSE)`, so re-run the CMake configure step after adding or removing `.cpp` files. Any new `tests/**/*.cpp` is compiled into the single `aiquant_tests` binary.
 
 ## Architecture

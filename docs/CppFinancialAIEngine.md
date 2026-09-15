@@ -59,16 +59,18 @@ struct Signal {
 
 ```
 /include/fin
-├─ core/           → Time, Tick, Bar, Buffers
-├─ io/             → CSV loader, Resampler, Stream reader
-├─ ind/            → Indicators (RSI, EMA, MACD, Bollinger, etc.)
-├─ ml/             → AI Models (Regressor, MLP), Feature extraction
+├─ core/           → Timestamp, Tick, Candle, RingBuffer
+├─ io/             → CSV loader, Resampler, Pipeline helpers
+├─ indicators/     → Indicators (RSI, EMA, MACD, Bollinger, etc.) and FeatureBus
+├─ ml/             → AI Models (LinearModel, LinearTrainer), Feature extraction
 ├─ signal/         → Signal Engine, Rules, Events
 ├─ backtest/       → Backtesting engine and metrics
-├─ py/             → Python bindings (optional)
-├─ app/            → CLI, HTTP Interface
+├─ app/            → Scenario config, runner, JSON serialization
+└─ api/            → ScenarioService facade
 
 ```
+
+The front-ends live outside `include/fin`: the CLI in `src/main.cpp`, the HTTP service in `src/server/http_main.cpp`, and the optional Python bindings in `bindings/python/`.
 
 ---
 
@@ -154,31 +156,31 @@ public:
 ## **🚀 MVP Coverage**
 
 - **Presentation**: `aiquant` CLI plus the `aiquant_http` microservice (POST `/run-file` or `/run-config`).
-- **API**: `fin::api::ScenarioService` for native embedding and the optional `aiquant_api` Python module (built without external dependencies).
+- **API**: `fin::api::ScenarioService` for native embedding and the optional `aiquant_api` Python module (built with pybind11, which is required whenever `AIQUANT_BUILD_PYTHON` is ON — the default).
 
 ---
 
-## **📁 Suggested Folder Structure**
+## **📁 Folder Structure**
 
 ```
 /aiquant
 ├─ include/fin/
 │   ├─ core/
 │   ├─ io/
-│   ├─ ind/
+│   ├─ indicators/
 │   ├─ ml/
 │   ├─ signal/
 │   ├─ backtest/
-│   ├─ py/
-│   └─ app/
+│   ├─ app/
+│   └─ api/
 ├─ src/
+│   ├─ fin/            → one directory per static library
+│   ├─ main.cpp        → aiquant CLI
+│   └─ server/         → aiquant_http
+├─ bindings/python/    → aiquant_api (pybind11)
+├─ scenarios/          → example INI + tick CSV
 ├─ tests/
-├─ bindings/python/
-├─ examples/
-├─ docs/
-│   ├─ architecture.md
-│   ├─ data-flow.png
-│   └─ layers.png
+└─ docs/
 
 ```
 
@@ -186,9 +188,7 @@ public:
 
 ## Diagrams
 
-![Layer Diagram](attachment:d300cb3c-e083-4ae8-977e-ba54fa4f8b63:layers.png)
-
-Layer Diagram
+The layer diagrams are not checked in. The per-layer design docs (`docs/CoreLayerDesign_*`, `docs/IndicatorsLayerDesign_*`, `docs/IOLayerDesign_*`) describe the same structure in text.
 
 ## **✅ Summary**
 

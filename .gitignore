@@ -4,3 +4,6 @@ build-cov/
 
 # Ignore VSCode settings
 .vscode/
+
+# Test fixtures written by older test runs (tests now use the system temp dir)
+/ticks_*.csv
