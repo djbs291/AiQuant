@@ -76,7 +76,7 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 6. ~~The linker reports duplicate static libraries because the executable targets repeat the full library list even though the dependencies are already `PUBLIC`.~~ Fixed 2026-09-16: the executables and the test binary link `fin_api` only; the warnings are gone.
 7. ~~`.gitignore` ignores `.vscode/`, but `.vscode/tasks.json` (a generic g++ single-file task) is committed.~~ Removed 2026-09-16; the file was a single-file g++ task unrelated to the CMake build.
 8. `ci.yml` runs `apt-get install` before `apt-get update` and builds lcov without using it. `release.yml` tars the whole build directory for Linux x86_64 only.
-9. Seven stale, unmerged `codex/*` branches (CI/lcov experiments from 2025-09) remain on the remote.
+9. ~~Seven stale, unmerged `codex/*` branches (CI/lcov experiments from 2025-09) remain on the remote.~~ Fixed 2026-09-16: the nine `codex/*` branches were deleted and PRs #4, #6, #7, #8 and #10 closed. Their tip SHAs are recorded in the closing comments, so the work can be restored if needed. Going forward, `delete_branch_on_merge` is enabled and `.github/workflows/branch-cleanup.yml` removes branches already merged into `main`.
 10. `IModel::fit` / `partial_fit` default to throwing `logic_error`. Training happens only through the free function `train_linear_from_feature_rows`, and there is no online learning.
 11. `FeatureBus`, and therefore the model and scenarios, uses only EMA/RSI/MACD. Bollinger Bands, ATR, ADX, Stochastic, VWAP, Z-Score and Momentum are implemented and tested but not available as model features.
 
