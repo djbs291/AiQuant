@@ -58,9 +58,21 @@ Use the interpreter CMake found (printed as `Found Python3` at configure time); 
 `aiquant_http` exposes the scenario runner over HTTP. Example usage:
 
 ```bash
-./build/aiquant_http --port 8080 &
-curl -X POST http://localhost:8080/run-file --data "scenarios/mvp.ini"      # body = path on the server
-curl -X POST http://localhost:8080/run-config --data-binary @scenarios/mvp.ini  # body = raw INI
+./build/aiquant_http --port 8080 --root scenarios &
+curl http://localhost:8080/health                                              # liveness
+curl -X POST http://localhost:8080/run-file --data "mvp.ini"                   # body = path under --root
+curl -X POST http://localhost:8080/run-config --data-binary @scenarios/mvp.ini # body = raw INI
 ```
 
-`POST /run-file` expects the HTTP body to contain a path to an existing scenario file on disk. `POST /run-config` accepts raw INI contents and executes them via a temporary file. Both endpoints return the JSON emitted by the CLI `--json` flag. The service is single-threaded and reads any path the process can reach, so keep it on a trusted network (see `docs/ProjectStatus.md`).
+`POST /run-file` takes a path to a scenario file; it is resolved against `--root` (default: the working directory) and anything outside that directory is refused. `POST /run-config` accepts raw INI contents and executes them via a temporary file. Both return the JSON emitted by the CLI `--json` flag.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--port` | 8080 | TCP port |
+| `--root` | working directory | directory `/run-file` may read scenarios from |
+| `--max-body` | 1048576 | maximum request body in bytes |
+| `--max-connections` | 32 | requests served concurrently before answering 503 |
+
+Status codes: `200` on success, `400` for a malformed request or unparsable INI, `403` for a path outside `--root`, `404` for a missing file or unknown endpoint, `405` for a method other than POST (except `GET /health`), `413` for an oversized body, `422` for a valid scenario the engine cannot run (too few candles, say), `503` when the concurrency limit is reached, and `500` otherwise.
+
+Each connection is served on its own thread. The service has no TLS and no authentication, and the `ticks` path inside a scenario is not restricted by `--root`, so keep it on a trusted network (see `docs/ProjectStatus.md`).

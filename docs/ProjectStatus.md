@@ -58,8 +58,8 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 1. **~~CI has been red on `main` since `fa04ec0`.~~ Fixed 2026-09-14 by PR #11 (`a1e7e90`); CI, Sanitizers and Coverage pass on `main`.** That commit made CMake stop with `FATAL_ERROR` when pybind11 is missing while `AIQUANT_BUILD_PYTHON` defaults to `ON`, and none of the workflows installs pybind11 or passes `-DAIQUANT_BUILD_PYTHON=OFF`. All three jobs fail about 30 s in with exit code 1, which fits a configure-step failure. Reproduced locally: configuring with pybind11 hidden (`-DCMAKE_DISABLE_FIND_PACKAGE_pybind11=ON`, no `pip` pybind11) stops at `CMakeLists.txt:121` with `pybind11 not found`. **Fix:** PR #11 (`fix/ci-pybind11`) installs `pybind11-dev` and `python3-dev` in all workflows. All three checks pass on it; `main` stays red until that PR is merged.
 
 ### Medium
-2. **`aiquant_http /run-file` opens any path the server process can read.** The request body is used as a filesystem path, which is unsafe if the port is reachable by others. The server is also single-threaded and blocking, a missing file returns 500 instead of a 4xx, and there is no `/health` endpoint.
-3. **`run-mvp --json` and `run-config --json` are not machine-readable:** the human-readable report is printed to stdout before the JSON, so the output can't be piped into `jq`. The HTTP and Python paths are unaffected.
+2. **~~`aiquant_http /run-file` opens any path the server process can read.~~** Fixed 2026-09-17: `/run-file` resolves the requested path against `--root` (default: the working directory) and answers 403 for anything outside it. Client errors now map to 400/403/404/405/413/422, there is a `GET /health`, bodies are capped by `--max-body`, and each connection is served on its own thread up to `--max-connections` (503 beyond that). **Still open:** no TLS or authentication, the `ticks` path inside a scenario is not restricted by `--root`, and it is thread-per-connection rather than a pool.
+3. **~~`run-mvp --json` and `run-config --json` are not machine-readable.~~** Fixed 2026-09-17: with `--json` the human report goes to stderr and stdout carries only the JSON document.
 4. **Test harness limitations:**
    - Tests use a bundled 95-line "minicatch" (`tests/catch2/catch.hpp`), so filtering by tag or name is not possible and there is no `SECTION`.
    - ~~Several tests write CSV fixtures into the current working directory.~~ Fixed 2026-09-16: fixtures go to the system temp dir via `tests/TestTempFiles.hpp` and are removed on scope exit.
@@ -94,15 +94,12 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 - ✅ Simplify `target_link_libraries` on the executables to rely on transitive `PUBLIC` dependencies.
 
 ### P2: hardening and test infrastructure
-- Make `--json` emit only JSON on stdout (send the report to stderr or drop it when `--json` is given).
-- HTTP service:
-  - restrict `/run-file` to a configured scenarios directory;
-  - map client errors to 4xx;
-  - add `/health`;
-  - add request size limits and concurrent request handling.
-- Fetch real Catch2 v3 (e.g. with `FetchContent`) to get filtering, `SECTION`s and `catch_discover_tests`; keep minicatch only as an offline fallback.
-- Add tests for the HTTP service and the Python module, plus golden tests against TA-Lib for the indicators, as the architecture doc plans.
-- Add a macOS CI job; the project builds and passes cleanly on Apple Silicon.
+- ✅ Make `--json` emit only JSON on stdout (the report goes to stderr).
+- ✅ HTTP service: `/run-file` restricted to `--root`; client errors mapped to 4xx; `GET /health`; `--max-body` limit; thread-per-connection up to `--max-connections`.
+- ✅ Add tests for the HTTP service (`tests/http/smoke_test.py`) and the Python module (`tests/python/smoke_test.py`), both run by `ci.yml`.
+- ✅ Add a macOS CI job; the project builds and passes cleanly on Apple Silicon.
+- ⬜ Fetch real Catch2 v3 (e.g. with `FetchContent`) to get filtering, `SECTION`s and `catch_discover_tests`; keep minicatch only as an offline fallback.
+- ⬜ Golden tests against TA-Lib for the indicators, as the architecture doc plans.
 
 ### P3: roadmap from the architecture doc
 - **Modelling:** make the `FeatureBus` feature set configurable (expose all 11 indicators), implement `IModel::fit` / `partial_fit` for online learning, and add richer models (the doc mentions MLP).
