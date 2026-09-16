@@ -20,9 +20,16 @@ cmake --build build
 ## Test
 
 ```bash
-ctest --test-dir build --output-on-failure   # C++ tests (aiquant_tests)
+ctest --test-dir build --output-on-failure            # C++ tests, one entry per TEST_CASE
+ctest --test-dir build -L unit                        # or -L golden
+./build/aiquant_tests "[rsi]"                         # Catch2 tag filtering
 PYTHONPATH=build python3 tests/python/smoke_test.py   # Python module smoke test
+python3 tests/http/smoke_test.py                      # HTTP service smoke test
 ```
+
+Tests use Catch2 v3, taken from the system package when one is installed and fetched otherwise. `-DAIQUANT_USE_BUNDLED_CATCH=ON` falls back to the bundled minicatch for offline builds, at the cost of filtering.
+
+Golden tests compare the indicators against [TA-Lib](https://ta-lib.org/) and are off by default. Install the C library (`brew install ta-lib`, or the `TA-Lib/setup-ta-lib` action) and configure with `-DAIQUANT_WITH_TALIB=ON`.
 
 ## CLI
 
