@@ -60,7 +60,7 @@ namespace fin::indicators
 
         // ADX seeding (collect first N DX)
         std::size_t dx_seed_count_ = 0;
-        std::size_t dx_sum_ = 0.0;
+        double dx_sum_ = 0.0; // DX is a real in [0,100]; an integer here truncated every seed
         bool adx_ready_ = false;
         double adx_ = 0.0;
     };
