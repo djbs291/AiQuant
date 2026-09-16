@@ -1,3 +1,6 @@
+// Load-bearing for the bundled minicatch: its header only emits main() under this
+// macro, and this is the single translation unit that defines it. Real Catch2 v3
+// ignores it and gets main() from Catch2::Catch2WithMain.
 #define CATCH_CONFIG_MAIN
 
 #include "catch2_compat.hpp"

@@ -140,88 +140,108 @@ endif()
 enable_testing()
 
 # Find Catch2
-find_package(Catch2 3 QUIET)
+option(AIQUANT_USE_BUNDLED_CATCH "Use the bundled minicatch instead of real Catch2 v3" OFF)
 
-if(NOT Catch2_FOUND)
-    find_package(Catch2 2 QUIET)
-endif()
-
-if(NOT Catch2_FOUND)
-    find_package(catch2 QUIET)
-endif()
-
-if(NOT Catch2_FOUND)
-    find_path(CATCH2_INCLUDE_DIR
-        NAMES catch2/catch.hpp catch2/catch_test_macros.hpp
-        PATHS /usr/include /usr/local/include
+if(NOT AIQUANT_USE_BUNDLED_CATCH)
+    include(FetchContent)
+    # FIND_PACKAGE_ARGS makes this prefer an installed Catch2 v3 (brew, apt) and download
+    # only when there is none, so a machine with the package configures offline.
+    FetchContent_Declare(Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.16.0
+        FIND_PACKAGE_ARGS 3
     )
-
-    if(CATCH2_INCLUDE_DIR)
-        message(STATUS "Found Catch2 headers manually at: ${CATCH2_INCLUDE_DIR}")
-        set(Catch2_FOUND TRUE)
-        add_library(Catch2::Catch2 INTERFACE IMPORTED)
-        target_include_directories(Catch2::Catch2 INTERFACE ${CATCH2_INCLUDE_DIR})
-    endif()
+    FetchContent_MakeAvailable(Catch2)
 endif()
 
-# Try bundled headers if Catch2 is still not found
-if(NOT Catch2_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/catch2/catch.hpp")
-    message(STATUS "Using bundled Catch2 headers")
+# Offline fallback: the bundled 95-line minicatch. No filtering, no SECTION, one ctest entry.
+if(NOT TARGET Catch2::Catch2WithMain AND NOT TARGET Catch2::Catch2
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/catch2/catch.hpp")
+    message(STATUS "Using the bundled minicatch headers")
     add_library(Catch2::Catch2 INTERFACE IMPORTED)
     target_include_directories(Catch2::Catch2 INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-    set(Catch2_FOUND TRUE)
 endif()
 
-# If Catch2 is still missing, disable tests
-if(NOT Catch2_FOUND)
+if(TARGET Catch2::Catch2WithMain OR TARGET Catch2::Catch2)
+    set(AIQUANT_HAVE_CATCH TRUE)
+else()
+    set(AIQUANT_HAVE_CATCH FALSE)
     message(STATUS "Catch2 not found; unit tests will be skipped.")
 endif()
 
 # Configure Test Executable
 file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp" "tests/*.cc" "tests/*.cxx")
+# The TA-Lib golden tests build into their own optional target, not into aiquant_tests.
+list(FILTER TEST_SOURCES EXCLUDE REGEX "/tests/golden/")
 
-if(Catch2_FOUND AND TEST_SOURCES)
+if(AIQUANT_HAVE_CATCH AND TEST_SOURCES)
     add_executable(aiquant_tests ${TEST_SOURCES})
     target_compile_definitions(aiquant_tests PRIVATE AIQUANT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
     if(TARGET Catch2::Catch2WithMain)
         target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_api)
-
-        add_executable(test_io tests/io/test_tick_to_candle.cpp)
-        target_link_libraries(test_io PRIVATE fin_io Catch2::Catch2WithMain)
-        add_executable(test_resampler tests/io/test_resampler.cpp)
-        target_link_libraries(test_resampler PRIVATE fin_io Catch2::Catch2WithMain)
-        add_executable(test_pipeline tests/io/test_pipeline_tick_csv_to_candles.cpp)
-        target_link_libraries(test_pipeline PRIVATE fin_io Catch2::Catch2WithMain)
-
-        target_include_directories(test_io PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-        target_include_directories(test_resampler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-        target_include_directories(test_pipeline PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-
         message(STATUS "Using Catch2 v3")
     else()
         target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_api)
-        message(STATUS "Using bundled or Catch2 v2")
+        message(STATUS "Using the bundled minicatch or Catch2 v2")
     endif()
 
     target_include_directories(aiquant_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     target_compile_features(aiquant_tests PRIVATE cxx_std_20)
     include(CTest)
 
-    if(COMMAND catch_discover_tests)
+    if(TARGET Catch2::Catch2WithMain)
+        # include(Catch) has to come first: it is what defines catch_discover_tests.
+        # Both Catch2Config.cmake and the FetchContent build put extras/ on CMAKE_MODULE_PATH.
         include(Catch)
-        catch_discover_tests(aiquant_tests)
+        # PRE_TEST keeps discovery out of the build step, which matters under sanitizers.
+        catch_discover_tests(aiquant_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS unit)
     else()
+        # minicatch's main() ignores argv, so the whole binary is one opaque ctest entry.
         add_test(NAME aiquant_tests COMMAND aiquant_tests)
-
-        if(TARGET Catch2::Catch2WithMain)
-            add_test(NAME test_io COMMAND test_io)
-            add_test(NAME test_resampler COMMAND test_resampler)
-            add_test(NAME test_pipeline COMMAND test_pipeline)
-        endif()
     endif()
 else()
     message(STATUS "Catch2 not found or no test files found. Unit tests disabled.")
+endif()
+
+# ============ TA-Lib golden tests (optional) ============
+# Off by default: TA-Lib is not installed on every dev machine. CI turns it on.
+option(AIQUANT_WITH_TALIB "Build the golden tests that compare indicators against TA-Lib" OFF)
+
+if(AIQUANT_WITH_TALIB)
+    # pkg-config is only a hint; TA-Lib ships ta-lib.pc but pkg-config itself may be absent.
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(PC_TALIB QUIET ta-lib)
+    endif()
+
+    find_path(TALIB_INCLUDE_DIR
+        NAMES ta-lib/ta_libc.h
+        HINTS ${PC_TALIB_INCLUDE_DIRS} ${PC_TALIB_INCLUDEDIR}
+    )
+    find_library(TALIB_LIBRARY
+        NAMES ta-lib ta_lib
+        HINTS ${PC_TALIB_LIBRARY_DIRS} ${PC_TALIB_LIBDIR}
+    )
+
+    file(GLOB_RECURSE TALIB_TEST_SOURCES "tests/golden/*.cpp")
+
+    if(NOT TARGET Catch2::Catch2WithMain)
+        message(WARNING "AIQUANT_WITH_TALIB=ON needs real Catch2 v3; golden tests skipped")
+    elseif(NOT TALIB_INCLUDE_DIR OR NOT TALIB_LIBRARY)
+        message(WARNING "AIQUANT_WITH_TALIB=ON but TA-Lib was not found; golden tests skipped")
+    elseif(TALIB_TEST_SOURCES)
+        add_executable(aiquant_talib_tests ${TALIB_TEST_SOURCES})
+        target_include_directories(aiquant_talib_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+            ${TALIB_INCLUDE_DIR}
+        )
+        target_link_libraries(aiquant_talib_tests PRIVATE fin_indicators Catch2::Catch2WithMain ${TALIB_LIBRARY})
+        target_compile_features(aiquant_talib_tests PRIVATE cxx_std_20)
+        catch_discover_tests(aiquant_talib_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS golden)
+        message(STATUS "TA-Lib golden tests enabled: ${TALIB_LIBRARY}")
+    endif()
 endif()
 
 # Build Info Summary

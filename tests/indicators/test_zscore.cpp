@@ -13,7 +13,8 @@ TEST_CASE("ZScore warmup and neutrality on flat series")
     REQUIRE_FALSE(z.update(10).has_value());
     auto v = z.update(10);
     REQUIRE(v.has_value());
-    REQUIRE(*v == Approx(0.0));
+    // Catch2's default epsilon is relative and degenerates against zero, so pin a margin.
+    REQUIRE(*v == Approx(0.0).margin(1e-12));
 }
 
 TEST_CASE("ZScore matches manual computation")
