@@ -26,12 +26,15 @@ cmake -S . -B /tmp/aiquant-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAG
 cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-on-failure
 
 # CLI (subcommands: features, backtest, train-linear, run-mvp, run-config; run without args for usage)
+# With --json, stdout is JSON only and the human report goes to stderr, so it pipes into jq.
 ./build/aiquant run-mvp ticks.csv --tf M1 --json --model-out model.csv
-./build/aiquant run-config scenario.ini --json
+./build/aiquant run-config scenario.ini --json | jq .metrics
 ./build/aiquant backtest ticks.csv --model-linear model.csv
 
-# HTTP (POST only): body of /run-file = path to an INI on the server; body of /run-config = raw INI
-./build/aiquant_http --port 8080
+# HTTP: GET /health; POST /run-file (body = INI path, must resolve under --root) and
+# POST /run-config (body = raw INI). --root defaults to the working directory.
+./build/aiquant_http --port 8080 --root scenarios [--max-body 1048576] [--max-connections 32]
+python3 tests/http/smoke_test.py   # endpoint + status-code smoke test, also run by ci.yml (not by ctest)
 
 # Python: use the same interpreter CMake found (printed as "Found Python3" at configure time)
 PYTHONPATH=build python3 -c "import aiquant_api as aq; print(aq.run_config({'ticks_path': 'ticks.csv'})['metrics'])"

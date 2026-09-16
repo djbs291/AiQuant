@@ -331,46 +331,49 @@ static const char *timeframe_to_cstr(fin::io::Timeframe tf)
     }
 }
 
-static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result)
+// Writes the human-readable report to `os`. With --json the report goes to stderr so that
+// stdout carries nothing but the JSON document and stays pipeable into jq.
+static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result,
+                                  std::ostream &os)
 {
-    std::cout << "=== MVP scenario ===\n";
-    std::cout << "Ticks: " << cfg.ticks_path << "\n";
-    std::cout << "Timeframe: " << timeframe_to_cstr(cfg.timeframe) << "\n";
-    std::cout << "Candles (post-resample): " << result.candles;
+    os << "=== MVP scenario ===\n";
+    os << "Ticks: " << cfg.ticks_path << "\n";
+    os << "Timeframe: " << timeframe_to_cstr(cfg.timeframe) << "\n";
+    os << "Candles (post-resample): " << result.candles;
     if (result.warmup_candles > 0)
-        std::cout << " (warmup " << result.warmup_candles << ")";
-    std::cout << "\n";
-    std::cout << "Feature rows: " << result.feature_rows << ", training samples: " << result.training.samples
+        os << " (warmup " << result.warmup_candles << ")";
+    os << "\n";
+    os << "Feature rows: " << result.feature_rows << ", training samples: " << result.training.samples
               << ", validation samples: " << result.validation_samples << "\n";
-    std::cout << "Train MSE: " << result.training.mse;
+    os << "Train MSE: " << result.training.mse;
     if (result.validation_samples > 0)
-        std::cout << ", validation RMSE: " << result.validation_rmse << "\n";
+        os << ", validation RMSE: " << result.validation_rmse << "\n";
     else
-        std::cout << ", validation RMSE: n/a\n";
+        os << ", validation RMSE: n/a\n";
 
     const auto &named = result.training.model.named_weights();
     if (!named.empty())
     {
-        std::cout << "Model weights: \n";
+        os << "Model weights: \n";
         for (const auto &[name, weight] : named)
-            std::cout << " " << name << ": " << weight << "\n";
-        std::cout << " bias: " << result.training.model.bias() << "\n";
+            os << " " << name << ": " << weight << "\n";
+        os << " bias: " << result.training.model.bias() << "\n";
     }
 
     if (!result.validation_preview.empty())
     {
-        std::cout << "Validation preview (ts_ms, pred_delta, actual_delta):\n";
+        os << "Validation preview (ts_ms, pred_delta, actual_delta):\n";
         for (const auto &row : result.validation_preview)
-            std::cout << " " << row.ts_ms << ", " << row.predicted_delta << ", " << row.actual_delta << "\n";
+            os << " " << row.ts_ms << ", " << row.predicted_delta << ", " << row.actual_delta << "\n";
     }
 
-    std::cout << "Backtest final cash: " << result.metrics.final_cash << "\n";
-    std::cout << "PnL: " << result.metrics.pnl << " (" << result.metrics.return_pct << "%)\n";
-    std::cout << "Trades: " << result.metrics.trades << " (Wins: " << result.metrics.wins
+    os << "Backtest final cash: " << result.metrics.final_cash << "\n";
+    os << "PnL: " << result.metrics.pnl << " (" << result.metrics.return_pct << "%)\n";
+    os << "Trades: " << result.metrics.trades << " (Wins: " << result.metrics.wins
               << ", Losses: " << result.metrics.losses << ")\n";
-    std::cout << "Max DD: " << result.metrics.max_drawdown << "%\n";
+    os << "Max DD: " << result.metrics.max_drawdown << "%\n";
     if (result.model_saved && cfg.model_output_path)
-        std::cout << "Saved model: " << *cfg.model_output_path << "\n";
+        os << "Saved model: " << *cfg.model_output_path << "\n";
 }
 
 static int cmd_run_mvp(const std::vector<std::string> &args)
@@ -433,7 +436,7 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
     try
     {
         auto result = fin::app::run_scenario(cfg);
-        print_scenario_result(cfg, result);
+        print_scenario_result(cfg, result, json_output ? std::cerr : std::cout);
         if (json_output)
             std::cout << fin::app::scenario_result_to_json(cfg, result);
         if (preview_out && !fin::app::write_validation_preview_csv(result, *preview_out))
@@ -469,7 +472,7 @@ static int cmd_run_config(const std::vector<std::string> &args)
     try
     {
         auto result = fin::app::run_scenario(cfg);
-        print_scenario_result(cfg, result);
+        print_scenario_result(cfg, result, json_output ? std::cerr : std::cout);
         if (json_output)
             std::cout << fin::app::scenario_result_to_json(cfg, result);
         if (preview_out && !fin::app::write_validation_preview_csv(result, *preview_out))
