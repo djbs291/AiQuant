@@ -26,7 +26,8 @@ jobs:
       - name: Package (tar.gz)
         run: |
           mkdir -p dist
-          tar -C build-rel -czf dist/aiquant-linux-x86_64.tar.gz .
+          # _deps holds the fetched Catch2 sources and objects; they do not belong in a release.
+          tar -C build-rel --exclude=_deps -czf dist/aiquant-linux-x86_64.tar.gz .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
