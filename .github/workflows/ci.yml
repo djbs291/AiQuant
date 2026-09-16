@@ -46,11 +46,57 @@ jobs:
           PY=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' build/CMakeCache.txt)
           PYTHONPATH=build "${PY:-python3}" tests/python/smoke_test.py
 
+      - name: HTTP service smoke test
+        run: python3 tests/http/smoke_test.py
+
       - name: Upload test logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/**/*.log
+            build/**/*.xml
+
+  build-test-macos:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 3
+      CTEST_OUTPUT_ON_FAILURE: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install deps
+        run: brew install ninja pybind11
+
+      - name: Configure (Debug)
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Python module smoke test
+        run: |
+          # Use the interpreter CMake built the module against (ABI must match).
+          PY=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' build/CMakeCache.txt)
+          PYTHONPATH=build "${PY:-python3}" tests/python/smoke_test.py
+
+      - name: HTTP service smoke test
+        run: python3 tests/http/smoke_test.py
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-macos
           path: |
             build/Testing/Temporary/LastTest.log
             build/**/*.log
