@@ -30,12 +30,16 @@ namespace fin::indicators
         double gain = std::max(delta, 0.0);
         double loss = std::max(-delta, 0.0);
 
-        if (count_ < period_)
+        if (!ready_)
         {
+            // Wilder seeds the averages with the mean of the first `period_` deltas, so the
+            // first RSI lands on bar `period_`. count_ counts bars seen, and bar 0 yields no
+            // delta, hence the +1. Accumulating only period_-1 deltas and dividing by period_
+            // used to make the first value both early and wrong.
             avg_gain_ += gain;
             avg_loss_ += loss;
             ++count_;
-            if (count_ == period_)
+            if (count_ == period_ + 1)
             {
                 avg_gain_ /= static_cast<double>(period_);
                 avg_loss_ /= static_cast<double>(period_);

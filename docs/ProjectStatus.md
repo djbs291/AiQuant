@@ -33,7 +33,7 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 | App | `fin_app` | `ScenarioConfig` INI parser, `run_scenario` (resample → features → train/validate → backtest), JSON output |
 | API | `fin_api` | `ScenarioService::run / run_file / load_file` |
 | Front-ends | executables and module | `aiquant` CLI (`features`, `backtest`, `train-linear`, `run-mvp`, `run-config`), `aiquant_http` (POST `/run-file`, `/run-config`), Python module `aiquant_api` (`run_file`, `run_config`, `load_file`) |
-| Tests | `aiquant_tests` | 69 test cases: core, all indicators, IO/resampler, feature pipeline, signal, backtester, linear model, scenario config and API |
+| Tests | `aiquant_tests`, `aiquant_talib_tests` | 69 unit test cases (core, all indicators, IO/resampler, feature pipeline, signal, backtester, linear model, scenario config and API) plus 11 TA-Lib golden cases; Catch2 v3 registers one ctest entry each |
 | CI | GitHub Actions | Ubuntu build + test, ASan/UBSan, lcov coverage, tag-based release tarball |
 
 ## 4. Verification results (2026-09-13)
@@ -61,7 +61,7 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 2. **~~`aiquant_http /run-file` opens any path the server process can read.~~** Fixed 2026-09-17: `/run-file` resolves the requested path against `--root` (default: the working directory) and answers 403 for anything outside it. Client errors now map to 400/403/404/405/413/422, there is a `GET /health`, bodies are capped by `--max-body`, and each connection is served on its own thread up to `--max-connections` (503 beyond that). **Still open:** no TLS or authentication, the `ticks` path inside a scenario is not restricted by `--root`, and it is thread-per-connection rather than a pool.
 3. **~~`run-mvp --json` and `run-config --json` are not machine-readable.~~** Fixed 2026-09-17: with `--json` the human report goes to stderr and stdout carries only the JSON document.
 4. **Test harness limitations:**
-   - Tests use a bundled 95-line "minicatch" (`tests/catch2/catch.hpp`), so filtering by tag or name is not possible and there is no `SECTION`.
+   - ~~Tests use a bundled 95-line "minicatch" (`tests/catch2/catch.hpp`), so filtering by tag or name is not possible and there is no `SECTION`.~~ Fixed 2026-09-17: real Catch2 v3, one ctest entry per case, tag and name filtering. minicatch remains only behind `-DAIQUANT_USE_BUNDLED_CATCH=ON`, where those limits still apply.
    - ~~Several tests write CSV fixtures into the current working directory.~~ Fixed 2026-09-16: fixtures go to the system temp dir via `tests/TestTempFiles.hpp` and are removed on scope exit.
    - ~~The committed root files `ticks_sample.csv`, `ticks_features.csv` and `ticks_sample_pipeline.csv` are copies of those generated fixtures, and running the tests from the repo root rewrites them.~~ Deleted 2026-09-16; `/ticks_*.csv` is now ignored.
 5. **Documentation drift.** Fixed 2026-09-16, except the Notion links:
@@ -79,6 +79,8 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 9. ~~Seven stale, unmerged `codex/*` branches (CI/lcov experiments from 2025-09) remain on the remote.~~ Fixed 2026-09-16: the nine `codex/*` branches were deleted and PRs #4, #6, #7, #8 and #10 closed. Their tip SHAs are recorded in the closing comments, so the work can be restored if needed. Going forward, `delete_branch_on_merge` is enabled and `.github/workflows/branch-cleanup.yml` removes branches already merged into `main`.
 10. `IModel::fit` / `partial_fit` default to throwing `logic_error`. Training happens only through the free function `train_linear_from_feature_rows`, and there is no online learning.
 11. `FeatureBus`, and therefore the model and scenarios, uses only EMA/RSI/MACD. Bollinger Bands, ATR, ADX, Stochastic, VWAP, Z-Score and Momentum are implemented and tested but not available as model features.
+12. ~~**RSI seeded one delta short.**~~ Fixed 2026-09-17, found by the TA-Lib golden tests. `RSI::update` accumulated `period - 1` deltas and divided by `period`, so the first value was both one bar early (bar 13 instead of 14 for a 14-period RSI) and wrong: 78.5758 where Wilder's definition, computed by hand and confirmed by `TA_RSI`, gives 78.5609. The error propagated through the smoothing (bar 18: 84.52 vs 84.20). The fix seeds on the first `period` deltas. Impact on the MVP scenario was small: same 300 candles, same warmup 33, same 267 feature rows, same 18 trades and PnL 0.6811; validation RMSE moved 0.00358 → 0.00357.
+13. ~~**ADX truncated its DX seed.**~~ Fixed 2026-09-17, also found by the golden tests. `ADX.hpp` declared `std::size_t dx_sum_ = 0.0`, so every DX was truncated to an integer before being averaged into the first ADX. `-Wall -Wextra -Wpedantic` does not catch this; `-Wfloat-conversion` would. **Still open, by design:** even with the right type, our directional family does not match TA-Lib bar for bar during warmup. We seed ATR/±DM with the mean of the first `period` bars, as in Wilder's book; TA-Lib (`ta_ADX.c`) accumulates `period - 1` bars and then applies a smoothing step, so its first value carries one extra decay. Both readings are defensible, and the gap decays: 4e-3 at the first bar, 5e-4 by bar 100, 1e-6 by bar 200, 8e-10 by bar 300. The golden tests therefore compare ADX and ±DI from bar 250 onward.
 
 ## 6. Next steps (prioritized)
 
@@ -98,8 +100,8 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 - ✅ HTTP service: `/run-file` restricted to `--root`; client errors mapped to 4xx; `GET /health`; `--max-body` limit; thread-per-connection up to `--max-connections`.
 - ✅ Add tests for the HTTP service (`tests/http/smoke_test.py`) and the Python module (`tests/python/smoke_test.py`), both run by `ci.yml`.
 - ✅ Add a macOS CI job; the project builds and passes cleanly on Apple Silicon.
-- ⬜ Fetch real Catch2 v3 (e.g. with `FetchContent`) to get filtering, `SECTION`s and `catch_discover_tests`; keep minicatch only as an offline fallback.
-- ⬜ Golden tests against TA-Lib for the indicators, as the architecture doc plans.
+- ✅ Fetch real Catch2 v3 (`FetchContent` with `FIND_PACKAGE_ARGS 3`, pinned to v3.16.0); minicatch stays as the offline fallback behind `-DAIQUANT_USE_BUNDLED_CATCH=ON`. `catch_discover_tests` now gives one ctest entry per case (69 unit + 11 golden) with `-L unit` / `-L golden` labels.
+- ✅ Golden tests against TA-Lib (`tests/golden/`, `-DAIQUANT_WITH_TALIB=ON`), covering SMA, EMA, RSI, ATR, ADX, ±DI, Bollinger, Momentum/ROCP, Z-Score, Stochastic and MACD. They found two real bugs on the first run — see issues 12 and 13.
 
 ### P3: roadmap from the architecture doc
 - **Modelling:** make the `FeatureBus` feature set configurable (expose all 11 indicators), implement `IModel::fit` / `partial_fit` for online learning, and add richer models (the doc mentions MLP).

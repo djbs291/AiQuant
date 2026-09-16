@@ -70,6 +70,8 @@ jobs:
           # Drop test object coverage ahead of capture to avoid GCC 13 geninfo
           # mismatched end-line errors (Catch2 registrars).
           find build-cov -name '*.gcda' -path '*tests*' -delete
+          # Catch2 pulled in by FetchContent lands in _deps, which the pattern above misses.
+          find build-cov -name '*.gcda' -path '*_deps*' -delete
 
           # lcov 1.16 lacks --ignore-errors inconsistent; rely on the rc knob
           # and ignore unused exclusion patterns to stay compatible.
@@ -77,7 +79,7 @@ jobs:
                --directory build-cov --capture --output-file coverage.info
           # filter out system & tests
           lcov --rc geninfo_unexecuted_blocks=1 \
-               --remove coverage.info '/usr/*' '*/tests/*' \
+               --remove coverage.info '/usr/*' '*/tests/*' '*/_deps/*' \
                --ignore-errors unused --output-file coverage.info
           # show summary
           lcov --rc geninfo_unexecuted_blocks=1 --list coverage.info

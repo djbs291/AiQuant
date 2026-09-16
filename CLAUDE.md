@@ -17,8 +17,13 @@ For current state, known issues and the roadmap, see `docs/ProjectStatus.md`. Th
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 
-# Tests: one ctest entry (aiquant_tests) containing all TEST_CASEs
+# Tests: one ctest entry per TEST_CASE (69 unit + 11 golden), so filters work
 ctest --test-dir build --output-on-failure
+ctest --test-dir build -L unit          # or -L golden; -R matches the test name
+./build/aiquant_tests "[rsi]"           # Catch2 tag filtering
+
+# Golden tests against TA-Lib (off by default; needs brew install ta-lib / setup-ta-lib)
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DAIQUANT_WITH_TALIB=ON
 
 # Sanitizers (mirrors .github/workflows/sanitizers.yml); keep the build dir outside the repo
 F="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
@@ -45,8 +50,10 @@ A scenario needs enough candles to get through indicator warmup (about 33 with d
 
 ## Testing gotchas
 
-- The tests use a **bundled 95-line "minicatch"** (`tests/catch2/catch.hpp`) unless a real Catch2 is installed. It has a plain `int main()` that ignores arguments, so **tag and name filters don't work**: `aiquant_tests "[rsi]"` still runs everything. It supports only `TEST_CASE`, `REQUIRE`, `REQUIRE_FALSE` and `Approx(...).margin()`; there is no `SECTION`. Always include `"catch2_compat.hpp"` so the same test sources also compile against real Catch2 v2/v3.
-- If a system Catch2 v3 is found, `CMakeLists.txt` takes a different path: it links `Catch2WithMain` and adds the extra `test_io` / `test_resampler` / `test_pipeline` executables. That path was not exercised locally.
+- Tests build against **real Catch2 v3**. `FetchContent_Declare(... FIND_PACKAGE_ARGS 3)` prefers an installed Catch2 (`brew install catch2`, apt) and downloads v3.16.0 only when there is none, so a machine with the package configures offline. `catch_discover_tests` registers one ctest entry per `TEST_CASE`.
+- The **bundled 95-line "minicatch"** (`tests/catch2/catch.hpp`) survives as the no-network, no-package fallback: `-DAIQUANT_USE_BUNDLED_CATCH=ON`. It has a plain `int main()` that ignores arguments, so **filters don't work there** and the whole binary is one ctest entry; it supports only `TEST_CASE`, `REQUIRE`, `REQUIRE_FALSE` and `Approx(...).margin()`, with no `SECTION`. Anything a new test uses beyond that subset breaks this path — check it with the flag before relying on those features.
+- `#define CATCH_CONFIG_MAIN` in `tests/core/test_price.cpp` is **load-bearing for that fallback**: it is the only thing that makes minicatch emit `main()`. Real Catch2 ignores it and gets `main()` from `Catch2::Catch2WithMain`.
+- Always include `"catch2_compat.hpp"`, which picks the framework and bridges `Catch::Approx` so unqualified `Approx(...)` keeps compiling. Note minicatch's `Approx` is an absolute 1e-12 while Catch2's default epsilon is relative (~1.2e-5), so the same assertion is stricter under the fallback.
 - Tests that need a file on disk use `tests/TestTempFiles.hpp` (`test_files::TempFile`), which writes to the system temp dir and deletes the file on scope exit. Keep new tests on that helper: writing into the current working directory pollutes the repo when `aiquant_tests` is run from the root.
 - Sources and tests are collected with `file(GLOB_RECURSE)`, so re-run the CMake configure step after adding or removing `.cpp` files. Any new `tests/**/*.cpp` is compiled into the single `aiquant_tests` binary.
 
