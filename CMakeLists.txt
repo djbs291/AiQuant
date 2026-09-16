@@ -97,7 +97,8 @@ target_link_libraries(aiquant PRIVATE fin_api)
 target_compile_features(aiquant PRIVATE cxx_std_20)
 
 add_executable(aiquant_http src/server/http_main.cpp)
-target_link_libraries(aiquant_http PRIVATE fin_api)
+find_package(Threads REQUIRED)
+target_link_libraries(aiquant_http PRIVATE fin_api Threads::Threads)
 target_compile_features(aiquant_http PRIVATE cxx_std_20)
 
 # ============ Python Bindings (optional) ============
