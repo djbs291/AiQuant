@@ -71,7 +71,7 @@ Use the interpreter CMake found (printed as `Found Python3` at configure time); 
 `aiquant_http` exposes the scenario runner over HTTP. Example usage:
 
 ```bash
-./build/aiquant_http --port 8080 --root scenarios --model model.csv &
+./build/aiquant_http --port 8080 --root scenarios --model model.csv --static examples/dashboard &
 curl http://localhost:8080/health                                              # liveness
 curl -X POST http://localhost:8080/run-file --data "mvp.ini"                   # body = path under --root
 curl -X POST http://localhost:8080/run-config --data-binary @scenarios/mvp.ini # body = raw INI
@@ -107,9 +107,22 @@ Every field is optional. Supply `prediction` to evaluate the rules against a num
 | `--port` | 8080 | TCP port |
 | `--root` | working directory | directory `/run-file` and request-supplied model paths resolve under |
 | `--model` | none | default model for `/predict` and `/signal` |
+| `--static` | off | directory served over `GET`; without it the service stays POST-only |
 | `--max-body` | 1048576 | maximum request body in bytes |
 | `--max-connections` | 32 | requests served concurrently before answering 503 |
 
-Status codes: `200` on success, `400` for a malformed request or unparsable INI, `403` for a path outside `--root`, `404` for a missing file or unknown endpoint, `405` for a method other than POST (except `GET /health`), `413` for an oversized body, `422` for a valid scenario the engine cannot run (too few candles, say), `503` when the concurrency limit is reached, and `500` otherwise.
+Status codes: `200` on success, `400` for a malformed request or unparsable INI, `403` for a path outside `--root`, `404` for a missing file or unknown endpoint, `405` for a method other than POST (except `GET /health` and, with `--static`, GET of a served file), `413` for an oversized body, `422` for a valid scenario the engine cannot run (too few candles, say), `503` when the concurrency limit is reached, and `500` otherwise.
+
+### Serving the dashboard
+
+`--static DIR` turns on `GET` for files under `DIR`, and it is **off unless you pass it** — publishing a directory should be a deliberate act. With it on:
+
+```bash
+./build/aiquant_http --port 8080 --root scenarios --static examples/dashboard
+```
+
+then open <http://localhost:8080/>. The page is described in [`examples/README.md`](examples/README.md), along with runnable scenarios and API scripts.
+
+The serving path is narrow on purpose: paths are confined to `DIR` the same way `/run-file` is confined to `--root` (a symlink pointing out is refused, not followed), percent-encoded paths are rejected rather than decoded, only a whitelist of extensions is served — `.svg` is excluded because SVG can carry script — dotfiles are refused, directories are never listed, and responses carry `nosniff` and a `default-src 'self'` policy. Asking for an API route with `GET` still answers `405`, not `404`. The server also refuses at startup to serve a directory that contains `--root`, which would otherwise publish your scenarios and models.
 
 Each connection is served on its own thread. The service has no TLS and no authentication, and the `ticks` path inside a scenario is not restricted by `--root`, so keep it on a trusted network (see `docs/ProjectStatus.md`).
