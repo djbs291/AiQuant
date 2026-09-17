@@ -37,6 +37,9 @@ namespace
         unsigned max_connections = 32;
         // Default model for /predict and /signal; a request may name another one under --root.
         std::string model_path;
+        // Directory served over GET. Empty means static serving is off, which is the default:
+        // a service that does not need it should not carry the extra attack surface.
+        std::filesystem::path static_dir;
     };
 
     constexpr std::size_t kMaxHeaderBytes = 16 * 1024;
@@ -167,12 +170,20 @@ namespace
         return ReadStatus::Ok;
     }
 
-    void send_response(int client_fd, int status, std::string_view status_text, const std::string &payload)
+    // content_type is defaulted so the thirty JSON call sites stay as they are; only the
+    // static-file path passes something else.
+    void send_response(int client_fd, int status, std::string_view status_text, const std::string &payload,
+                       std::string_view content_type = "application/json",
+                       std::string_view extra_headers = {})
     {
+        // Nothing derived from the request ever reaches a header: the content type comes from a
+        // fixed table and extra_headers from a constant, which is what keeps response splitting
+        // off the table.
         std::ostringstream out;
         out << "HTTP/1.1 " << status << ' ' << status_text << "\r\n"
-            << "Content-Type: application/json\r\n"
+            << "Content-Type: " << content_type << "\r\n"
             << "Content-Length: " << payload.size() << "\r\n"
+            << extra_headers
             << "Connection: close\r\n\r\n"
             << payload;
         const auto response = out.str();
@@ -270,6 +281,147 @@ namespace
 
         resolved = candidate;
         return PathStatus::Ok;
+    }
+
+    // ---- static files, served only when --static is given ----------------------------------
+
+    // Files are read whole into memory; the server does not stream. The cap keeps one large
+    // file in the served directory from turning a request into a denial of service.
+    constexpr std::size_t kMaxStaticBytes = 2 * 1024 * 1024;
+
+    // Whitelist by extension. Anything else is treated as absent rather than refused with a
+    // distinct code, so the service does not confirm which files exist but are not served.
+    // .svg is deliberately absent: SVG can carry script and would run same-origin. The page
+    // uses inline markup instead, so excluding it costs nothing.
+    std::string_view mime_for(const std::filesystem::path &path)
+    {
+        const std::string ext = path.extension().string();
+        if (ext == ".html")
+            return "text/html; charset=utf-8";
+        if (ext == ".css")
+            return "text/css; charset=utf-8";
+        if (ext == ".js")
+            return "text/javascript; charset=utf-8";
+        if (ext == ".json")
+            return "application/json";
+        if (ext == ".png")
+            return "image/png";
+        if (ext == ".ico")
+            return "image/x-icon";
+        if (ext == ".txt")
+            return "text/plain; charset=utf-8";
+        return {};
+    }
+
+    // Sent with every static response: stop MIME sniffing, and pin the page to same-origin
+    // resources so the no-CDN rule is enforced at runtime and not only by convention.
+    constexpr std::string_view kStaticSecurityHeaders =
+        "X-Content-Type-Options: nosniff\r\n"
+        "Content-Security-Policy: default-src 'self'; base-uri 'none'; form-action 'none'\r\n"
+        "Referrer-Policy: no-referrer\r\n";
+
+    // API routes are matched before static files, so asking for one with the wrong method
+    // still answers 405 rather than "no such file".
+    bool is_api_route(std::string_view path)
+    {
+        return path == "/run-file" || path == "/run-config" || path == "/predict" || path == "/signal";
+    }
+
+    void handle_static(int client, const Options &opts, const std::string &request_path)
+    {
+        // Query and fragment go before anything else inspects the path.
+        std::string path = request_path.substr(0, request_path.find_first_of("?#"));
+
+        if (path.empty() || path.front() != '/')
+        {
+            send_response(client, 400, "Bad Request", json_error("Malformed request path"));
+            return;
+        }
+
+        // Percent-encoding is refused rather than decoded. A hand-rolled decoder is exactly
+        // where traversal bypasses come from, and the page this serves needs no escapes.
+        if (path.find('%') != std::string::npos)
+        {
+            send_response(client, 400, "Bad Request",
+                          json_error("Percent-encoded paths are not supported"));
+            return;
+        }
+
+        if (path == "/")
+            path = "/index.html";
+        if (path.back() == '/')
+        {
+            // No directory listings.
+            send_response(client, 404, "Not Found", json_error("Not found"));
+            return;
+        }
+
+        // Refuse dotfiles outright. The extension whitelist already stops most of them, but a
+        // name like ".htpasswd.txt" would otherwise sail through as text/plain.
+        for (const auto &component : std::filesystem::path(path))
+        {
+            const std::string name = component.string();
+            if (name.size() > 1 && name.front() == '.' && name != "..")
+            {
+                send_response(client, 404, "Not Found", json_error("Not found"));
+                return;
+            }
+        }
+
+        std::filesystem::path resolved;
+        // Same containment as /run-file: weakly_canonical resolves symlinks, so a link that
+        // points out of the directory fails the check rather than being followed.
+        switch (resolve_under_root(opts.static_dir, path.substr(1), resolved))
+        {
+        case PathStatus::Empty:
+            send_response(client, 400, "Bad Request", json_error("Malformed request path"));
+            return;
+        case PathStatus::Outside:
+            send_response(client, 403, "Forbidden",
+                          json_error("Path is outside the configured static directory"));
+            return;
+        case PathStatus::Missing:
+            send_response(client, 404, "Not Found", json_error("Not found"));
+            return;
+        case PathStatus::Ok:
+            break;
+        }
+
+        const std::string_view content_type = mime_for(resolved);
+        if (content_type.empty())
+        {
+            send_response(client, 404, "Not Found", json_error("Not found"));
+            return;
+        }
+
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(resolved, ec);
+        if (ec)
+        {
+            send_response(client, 404, "Not Found", json_error("Not found"));
+            return;
+        }
+        if (size > kMaxStaticBytes)
+        {
+            // 500, not 413: 413 is about the request body, and a file that is too big to serve
+            // is a server misconfiguration, not something the client did wrong.
+            std::cerr << "Static file exceeds " << kMaxStaticBytes << " bytes: " << resolved << "\n";
+            send_response(client, 500, "Internal Server Error", json_error("File too large to serve"));
+            return;
+        }
+
+        std::ifstream in(resolved, std::ios::binary);
+        if (!in)
+        {
+            send_response(client, 404, "Not Found", json_error("Not found"));
+            return;
+        }
+
+        std::string body(static_cast<std::size_t>(size), '\0');
+        in.read(body.data(), static_cast<std::streamsize>(size));
+        body.resize(static_cast<std::size_t>(in.gcount()));
+
+        send_response(client, 200, "OK", body, content_type, kStaticSecurityHeaders);
     }
 
     // ---- JSON request helpers for /predict and /signal -------------------------------------
@@ -536,10 +688,21 @@ namespace
             return;
         }
 
+        // Static files, when a directory was configured. Anything else GET falls through to
+        // the 405 below, so the service stays POST-only unless --static was given.
+        if (req.method == "GET" && !opts.static_dir.empty() &&
+            !is_api_route(req.path.substr(0, req.path.find_first_of("?#"))))
+        {
+            handle_static(client, opts, req.path);
+            return;
+        }
+
         if (req.method != "POST")
         {
             send_response(client, 405, "Method Not Allowed",
-                          json_error("Only POST is supported, apart from GET /health"));
+                          json_error(opts.static_dir.empty()
+                                         ? "Only POST is supported, apart from GET /health"
+                                         : "Only POST is supported, apart from GET /health and GET of static files"));
             return;
         }
 
@@ -632,10 +795,11 @@ namespace
 
     void print_usage()
     {
-        std::cerr << "Usage: aiquant_http [--port N] [--root DIR] [--model FILE] [--max-body BYTES]"
-                     " [--max-connections N]\n"
+        std::cerr << "Usage: aiquant_http [--port N] [--root DIR] [--model FILE] [--static DIR]"
+                     " [--max-body BYTES] [--max-connections N]\n"
                   << "  --root             directory /run-file and model paths resolve under (default: cwd)\n"
                   << "  --model            default model for /predict and /signal\n"
+                  << "  --static           directory served over GET (default: off)\n"
                   << "  --max-body         maximum request body in bytes (default: 1048576)\n"
                   << "  --max-connections  requests served concurrently before 503 (default: 32)\n";
     }
@@ -663,6 +827,8 @@ namespace
                     opts.root = value;
                 else if (arg == "--model")
                     opts.model_path = value;
+                else if (arg == "--static")
+                    opts.static_dir = value;
                 else if (arg == "--max-body")
                     opts.max_body = static_cast<std::size_t>(std::stoull(value));
                 else if (arg == "--max-connections")
@@ -703,6 +869,31 @@ int main(int argc, char **argv)
     {
         std::cerr << "Cannot resolve root directory: " << ec.message() << "\n";
         return 2;
+    }
+
+    if (!opts.static_dir.empty())
+    {
+        if (!std::filesystem::is_directory(opts.static_dir, ec))
+        {
+            std::cerr << "Static directory does not exist: " << opts.static_dir << "\n";
+            return 2;
+        }
+        opts.static_dir = std::filesystem::weakly_canonical(opts.static_dir, ec);
+        if (ec)
+        {
+            std::cerr << "Cannot resolve static directory: " << ec.message() << "\n";
+            return 2;
+        }
+
+        // Serving a directory that contains --root would publish every scenario, model and tick
+        // file over GET. `--root . --static .` is an easy thing to type, so refuse it here.
+        const auto relative = opts.root.lexically_relative(opts.static_dir);
+        if (!relative.empty() && *relative.begin() != "..")
+        {
+            std::cerr << "Refusing to serve " << opts.static_dir << ": it contains the scenario root "
+                      << opts.root << "\n";
+            return 2;
+        }
     }
 
     // A client that disappears mid-response must not take the server down with SIGPIPE.

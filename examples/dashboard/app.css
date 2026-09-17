@@ -1,0 +1,124 @@
+:root {
+  --bg: #12151a;
+  --panel: #1b2029;
+  --ink: #e6e9ef;
+  --muted: #98a2b3;
+  --line: #2b323d;
+  --accent: #5b9dff;
+  --buy: #3ddc97;
+  --sell: #ff6b6b;
+  --hold: #b0b8c4;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+header { margin-bottom: 1.25rem; }
+h1 { margin: 0; font-size: 1.4rem; letter-spacing: 0.04em; }
+h2 { margin: 0 0 0.25rem; font-size: 1rem; }
+
+.status { margin: 0.35rem 0 0; color: var(--muted); }
+.status.up { color: var(--buy); }
+.status.down { color: var(--sell); }
+
+main {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.hint { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+
+label { display: block; margin-bottom: 0.5rem; color: var(--muted); }
+label.check { display: flex; align-items: center; gap: 0.4rem; }
+
+input, textarea {
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 0.4rem 0.5rem;
+  background: #0e1116;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+}
+
+textarea { resize: vertical; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0 0.75rem;
+}
+
+.feature-row { display: flex; gap: 0.5rem; margin-bottom: 0.4rem; }
+.feature-row input { margin-top: 0; }
+.feature-row .name { flex: 2; }
+.feature-row .value { flex: 1; }
+.feature-row button {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.6rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+button {
+  margin-top: 0.5rem;
+  margin-right: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  background: var(--accent);
+  color: #08101f;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-weight: 400;
+}
+
+button:disabled { opacity: 0.6; cursor: default; }
+
+.out {
+  margin-top: 0.75rem;
+  padding: 0.6rem;
+  min-height: 1.5rem;
+  background: #0e1116;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.out.error { border-color: var(--sell); color: var(--sell); }
+
+.verdict { font-size: 1.1rem; font-weight: 700; }
+.verdict.Buy { color: var(--buy); }
+.verdict.Sell { color: var(--sell); }
+.verdict.Hold { color: var(--hold); }
+
+table { width: 100%; border-collapse: collapse; }
+td { padding: 0.15rem 0; }
+td:last-child { text-align: right; }
+td.key { color: var(--muted); }

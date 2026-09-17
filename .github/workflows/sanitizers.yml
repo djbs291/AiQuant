@@ -33,3 +33,8 @@ jobs:
 
       - name: Test (ASan/UBSan)
         run: ctest --test-dir build-asan --output-on-failure
+
+      # ctest never runs the server, so without this the request and path parsing — the code
+      # that actually reads untrusted input — gets no sanitizer coverage at all.
+      - name: HTTP service smoke test (ASan/UBSan)
+        run: AIQUANT_BUILD_DIR=build-asan python3 tests/http/smoke_test.py
