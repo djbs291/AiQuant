@@ -60,6 +60,7 @@ jobs:
       - name: Examples
         run: |
           ./build/aiquant run-config examples/wide_features.ini --json > /dev/null
+          ./build/aiquant run-config examples/sgd_online.ini --json > /dev/null
           PY=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' build/CMakeCache.txt)
           PYTHONPATH=build "${PY:-python3}" examples/run_scenario.py
 
@@ -110,6 +111,7 @@ jobs:
       - name: Examples
         run: |
           ./build/aiquant run-config examples/wide_features.ini --json > /dev/null
+          ./build/aiquant run-config examples/sgd_online.ini --json > /dev/null
           PY=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' build/CMakeCache.txt)
           PYTHONPATH=build "${PY:-python3}" examples/run_scenario.py
 

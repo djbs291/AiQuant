@@ -74,7 +74,7 @@ fin_core (Timestamp, Price, Volume, Symbol, Tick, Candle, RingBuffer)
  ├─ fin_io        (FileTickSource CSV reader, TickToCandleResampler S1/S5/M1/M5/H1, Pipeline helpers)
  └─ fin_signal    (IndicatorsSnapshot -> SignalEngine -> Signal)
 fin_backtest (Backtester: long-only, cash/qty/fee, drawdown)   -> core, indicators, signal
-fin_ml       (FeatureVector, IModel, LinearModel, LinearTrainer) -> core, indicators
+fin_ml       (FeatureVector, IModel, LinearModel, LinearTrainer, SgdRegressor) -> core, indicators
 fin_app      (ScenarioConfig INI IO, ScenarioRunner, JSON serialization) -> all of the above
 fin_api      (fin::api::ScenarioService: run / run_file / load_file) -> fin_app
 ```
@@ -86,9 +86,9 @@ Front-ends: `src/main.cpp` (the `aiquant` CLI), `src/server/http_main.cpp` (`aiq
 The core pipeline is `fin::app::run_scenario` (`src/fin/app/ScenarioRunner.cpp`):
 1. `io::resample_csv_with_stats(ticks_path, timeframe)` builds the candles.
 2. `indicators::FeatureBus` turns each candle into a `FeatureRow`. The feature set is configurable: the bus builds one indicator per name from the catalogue in `include/fin/indicators/FeatureSpec.hpp`, and the row carries its `FeatureSchema` so `FeatureVector` can name the columns. Without a `features` key the set is the historical six (close, ema_fast, rsi, macd, macd_signal, macd_hist), in that order. Warmup is all-or-nothing: `std::nullopt` until *every* selected indicator is ready. `FeatureRow::close` is kept outside `values` because the training target is `close[i+1] - close[i]`, which must hold even when `close` is not a selected feature.
-3. The first `train_ratio` of rows goes to `ml::train_linear_from_feature_rows`, a ridge regression on the target `next_close - close`.
+3. The first `train_ratio` of rows goes to the trainer the `model` key selects: `ml::train_linear_from_feature_rows` (ridge, the default) or `ml::train_sgd_from_feature_rows`, which wraps `fin::ml::SgdRegressor` — the only `IModel` that implements `fit` and `partial_fit`. Both fit the target `next_close - close`. An SGD run is converted with `SgdRegressor::to_linear_model()`, which folds the running standardizer back into the weights, so the reported weights, the saved model file and `/predict` are shaped exactly like a ridge run.
 4. Validation RMSE and a preview are computed on the remaining rows.
-5. A second, fresh `FeatureBus` replays all candles. Each candle's model prediction is passed as the *pending* prediction to `Backtester::on_candle` for the **next** candle. The backtester maintains its own EMA/RSI and asks `SignalEngine::eval(snapshot, prediction)` for Buy/Sell/Hold.
+5. A second, fresh `FeatureBus` replays all candles. Each candle's model prediction is passed as the *pending* prediction to `Backtester::on_candle` for the **next** candle. The backtester maintains its own EMA/RSI and asks `SignalEngine::eval(snapshot, prediction)` for Buy/Sell/Hold. With `online_update` the replay also calls `partial_fit` on every row past the training split, always one row behind — a row's target is only realized when the next row closes — and `ScenarioResult` reports `online_updates` beside a prequential `online_validation_rmse`.
 6. `Backtester::finalize()` returns `Metrics` (final_cash, pnl, return_pct, max_drawdown, trades, wins, losses).
 
 When you change a config field, keep these in sync:

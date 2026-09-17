@@ -222,6 +222,33 @@ namespace
         if (!set_size(dict, "stoch_d_period", cfg.stoch_d_period, error)) return false;
         if (!set_size(dict, "zscore_period", cfg.zscore_period, error)) return false;
         if (!set_size(dict, "momentum_period", cfg.momentum_period, error)) return false;
+        if (!set_double(dict, "sgd_learning_rate", cfg.sgd.learning_rate, error)) return false;
+        if (!set_double(dict, "sgd_l2", cfg.sgd.l2, error)) return false;
+        if (!set_size(dict, "sgd_epochs", cfg.sgd.epochs, error)) return false;
+        if (!set_double(dict, "sgd_power_t", cfg.sgd.power_t, error)) return false;
+        if (!set_bool(dict, "sgd_standardize", cfg.sgd.standardize, error)) return false;
+        if (!set_bool(dict, "online_update", cfg.online_update, error)) return false;
+
+        if (py::object kind = get_if_present(dict, "model", &present); present)
+        {
+            if (!py::isinstance<py::str>(kind))
+            {
+                error = "model must be a string";
+                return false;
+            }
+            // Exact tokens: unlike the INI keys there is no case folding here, so a typo is
+            // an error rather than a silent fall back to the default trainer.
+            const std::string token = kind.cast<std::string>();
+            if (token == "ridge" || token == "linear")
+                cfg.model = fin::app::ModelKind::Ridge;
+            else if (token == "sgd")
+                cfg.model = fin::app::ModelKind::Sgd;
+            else
+            {
+                error = "Unknown model: " + token + " (expected 'ridge' or 'sgd')";
+                return false;
+            }
+        }
 
         if (py::object model = get_if_present(dict, "model_output_path", &present); present)
         {
@@ -256,6 +283,10 @@ namespace
         root["validation_samples"] = result.validation_samples;
         root["training_mse"] = result.training.mse;
         root["validation_rmse"] = result.validation_rmse;
+        root["model"] = result.model;
+        root["online_update"] = result.online_update;
+        root["online_updates"] = result.online_updates;
+        root["online_validation_rmse"] = result.online_validation_rmse;
         root["model_saved"] = result.model_saved;
 
         py::dict metrics;
@@ -288,6 +319,13 @@ namespace
         dict["timeframe"] = timeframe_to_str(cfg.timeframe);
         dict["train_ratio"] = cfg.train_ratio;
         dict["ridge_lambda"] = cfg.ridge_lambda;
+        dict["model"] = (cfg.model == fin::app::ModelKind::Sgd) ? "sgd" : "ridge";
+        dict["sgd_learning_rate"] = cfg.sgd.learning_rate;
+        dict["sgd_l2"] = cfg.sgd.l2;
+        dict["sgd_epochs"] = cfg.sgd.epochs;
+        dict["sgd_power_t"] = cfg.sgd.power_t;
+        dict["sgd_standardize"] = cfg.sgd.standardize;
+        dict["online_update"] = cfg.online_update;
         dict["ema_fast"] = cfg.ema_fast;
         dict["ema_slow"] = cfg.ema_slow;
         dict["rsi_period"] = cfg.rsi_period;
