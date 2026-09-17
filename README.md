@@ -48,6 +48,12 @@ A scenario needs enough candles to clear indicator warmup: about 33 with the def
 
 `aiquant run-config` executes full scenarios. The supported keys and grammar are documented in `docs/ScenarioConfig.md`, and a ready-to-run example lives at `scenarios/mvp.ini` (pointing to `scenarios/ticks_mvp.csv`). Use these as a template when wiring new experiments.
 
+The model's feature set is part of the scenario. `features = close,ema_fast,rsi,atr,adx` picks any of the 20 names in the catalogue (every output of the 11 indicators, `vwap` included); omit the key and you get the historical six. The resolved set is reported in the JSON and written into the trained model file, so a model cannot be applied to a feature set it was not trained on without noticing:
+
+```bash
+./build/aiquant run-mvp scenarios/ticks_mvp.csv --features close,ema_fast,rsi,atr,adx --json | jq .features
+```
+
 ## C++ / Python API
 
 The `fin::api::ScenarioService` offers a stable programmatic entry point for running scenarios. Link against the `fin_api` static library and call `ScenarioService::run` or `ScenarioService::run_file`. Python bindings are implemented with [pybind11](https://pybind11.readthedocs.io/) (installable via `pip install pybind11`) and expose the same helpers. Build + import example:

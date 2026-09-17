@@ -12,12 +12,35 @@ using fin::indicators::FeatureRow;
 using fin::ml::FeatureVector;
 using fin::ml::LinearModel;
 
+namespace
+{
+    // Rows carry their schema now, so build them through the default six rather than by
+    // aggregate initialisation.
+    std::shared_ptr<const fin::indicators::FeatureSchema> default_schema()
+    {
+        static const std::shared_ptr<const fin::indicators::FeatureSchema> schema = [] {
+            auto s = std::make_shared<fin::indicators::FeatureSchema>();
+            s->names = fin::indicators::default_feature_names();
+            return s;
+        }();
+        return schema;
+    }
+
+    FeatureRow make_feature_row(double close, double ema_fast, double rsi,
+                                double macd, double macd_signal, double macd_hist)
+    {
+        FeatureRow row;
+        row.ts = fin::core::Timestamp{};
+        row.close = close;
+        row.values = {close, ema_fast, rsi, macd, macd_signal, macd_hist};
+        row.schema = default_schema();
+        return row;
+    }
+}
+
 TEST_CASE("LinearModel positional weights", "[ml][linear]")
 {
-    FeatureRow row{
-        fin::core::Timestamp{},
-        100.0, 101.0, 60.0,
-        1.5, 1.2, 0.3};
+    FeatureRow row = make_feature_row(100.0, 101.0, 60.0, 1.5, 1.2, 0.3);
 
     auto fv = FeatureVector::from_feature_row(row);
 
@@ -31,10 +54,7 @@ TEST_CASE("LinearModel positional weights", "[ml][linear]")
 
 TEST_CASE("LinearModel named weights", "[ml][linear]")
 {
-    FeatureRow row{
-        fin::core::Timestamp{},
-        100.0, 101.0, 60.0,
-        1.5, 1.2, 0.3};
+    FeatureRow row = make_feature_row(100.0, 101.0, 60.0, 1.5, 1.2, 0.3);
 
     auto fv = FeatureVector::from_feature_row(row);
 
@@ -61,10 +81,7 @@ TEST_CASE("LinearModel loads from file", "[ml][linear]")
     REQUIRE(model.load_from_file(path.string()));
     REQUIRE(model.is_ready());
 
-    FeatureRow row{
-        fin::core::Timestamp{},
-        100.0, 98.0, 55.0,
-        1.0, 0.8, 0.2};
+    FeatureRow row = make_feature_row(100.0, 98.0, 55.0, 1.0, 0.8, 0.2);
 
     auto fv = FeatureVector::from_feature_row(row);
     double expected = 0.2 + 0.1 * 100.0 + (-0.05) * 98.0; // rsi/macd weights omitted => 0
@@ -84,15 +101,12 @@ TEST_CASE("LinearTrainer recovers known weights", "[ml][linear]")
 
     auto make_row = [](int idx, double cls)
     {
-        FeatureRow r{};
-        r.ts = fin::core::Timestamp{};
-        r.close = cls;
-        r.ema_fast = 10.0 + 0.15 * cls + 0.7 * idx;
-        r.rsi = 35.0 + 1.1 * idx * idx;
-        r.macd = 0.6 * idx + 0.01 * cls;
-        r.macd_signal = 0.2 * idx * idx;
-        r.macd_hist = 0.05 * idx + 0.02 * idx * idx;
-        return r;
+        return make_feature_row(cls,
+                                10.0 + 0.15 * cls + 0.7 * idx,
+                                35.0 + 1.1 * idx * idx,
+                                0.6 * idx + 0.01 * cls,
+                                0.2 * idx * idx,
+                                0.05 * idx + 0.02 * idx * idx);
     };
 
     for (int i = 0; i < samples; ++i)
@@ -101,12 +115,8 @@ TEST_CASE("LinearTrainer recovers known weights", "[ml][linear]")
         rows.push_back(row);
 
         double delta = bias;
-        delta += weights[0] * row.close;
-        delta += weights[1] * row.ema_fast;
-        delta += weights[2] * row.rsi;
-        delta += weights[3] * row.macd;
-        delta += weights[4] * row.macd_signal;
-        delta += weights[5] * row.macd_hist;
+        for (std::size_t j = 0; j < weights.size(); ++j)
+            delta += weights[j] * row.values[j];
         close += delta;
     }
     rows.push_back(make_row(samples, close));
@@ -117,12 +127,8 @@ TEST_CASE("LinearTrainer recovers known weights", "[ml][linear]")
 
     auto fv0 = FeatureVector::from_feature_row(rows.front());
     double expected = bias;
-    expected += weights[0] * rows.front().close;
-    expected += weights[1] * rows.front().ema_fast;
-    expected += weights[2] * rows.front().rsi;
-    expected += weights[3] * rows.front().macd;
-    expected += weights[4] * rows.front().macd_signal;
-    expected += weights[5] * rows.front().macd_hist;
+    for (std::size_t j = 0; j < weights.size(); ++j)
+        expected += weights[j] * rows.front().values[j];
     double pred = summary.model.predict(fv0);
     REQUIRE(pred == Approx(expected).margin(1e-3));
 }
@@ -136,15 +142,12 @@ TEST_CASE("LinearTrainer saves and reloads models", "[ml][linear]")
 
     auto make_row = [](int idx, double cls)
     {
-        FeatureRow r{};
-        r.ts = fin::core::Timestamp{};
-        r.close = cls;
-        r.ema_fast = 5.0 + 0.08 * cls + 0.9 * idx;
-        r.rsi = 25.0 + 0.7 * idx * idx;
-        r.macd = 0.4 * idx + 0.02 * cls;
-        r.macd_signal = 0.1 * idx * idx;
-        r.macd_hist = -0.03 * idx + 0.015 * idx * idx;
-        return r;
+        return make_feature_row(cls,
+                                5.0 + 0.08 * cls + 0.9 * idx,
+                                25.0 + 0.7 * idx * idx,
+                                0.4 * idx + 0.02 * cls,
+                                0.1 * idx * idx,
+                                -0.03 * idx + 0.015 * idx * idx);
     };
 
     for (int i = 0; i < 12; ++i)
@@ -153,12 +156,8 @@ TEST_CASE("LinearTrainer saves and reloads models", "[ml][linear]")
         rows.push_back(row);
 
         double delta = bias;
-        delta += weights[0] * row.close;
-        delta += weights[1] * row.ema_fast;
-        delta += weights[2] * row.rsi;
-        delta += weights[3] * row.macd;
-        delta += weights[4] * row.macd_signal;
-        delta += weights[5] * row.macd_hist;
+        for (std::size_t j = 0; j < weights.size(); ++j)
+            delta += weights[j] * row.values[j];
         close += delta;
     }
     rows.push_back(make_row(12, close));
@@ -172,12 +171,8 @@ TEST_CASE("LinearTrainer saves and reloads models", "[ml][linear]")
 
     auto fv = FeatureVector::from_feature_row(rows.front());
     double expected = bias;
-    expected += weights[0] * rows.front().close;
-    expected += weights[1] * rows.front().ema_fast;
-    expected += weights[2] * rows.front().rsi;
-    expected += weights[3] * rows.front().macd;
-    expected += weights[4] * rows.front().macd_signal;
-    expected += weights[5] * rows.front().macd_hist;
+    for (std::size_t j = 0; j < weights.size(); ++j)
+        expected += weights[j] * rows.front().values[j];
     double pred = loaded.predict(fv);
     REQUIRE(pred == Approx(expected).margin(1e-3));
 

@@ -250,6 +250,166 @@ namespace fin::indicators
         std::optional<double> last_;
     };
 
+    // ---------- Close (pseudo-indicator: the raw close, ready from the first candle) ----------
+    class CloseFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        void update(const Candle &c) override { last_ = c.close().value(); }
+        bool is_ready() const override { return last_.has_value(); }
+        double value() const override { return *last_; }
+        void reset() override { last_.reset(); }
+
+    private:
+        std::optional<double> last_;
+    };
+
+    // The adapters above expose one scalar per indicator, which left the other outputs of the
+    // multi-output indicators unreachable. These cover the rest, so every value a feature set
+    // can name has an adapter.
+
+    // ---------- MACD line and signal (uses close) ----------
+    class MACDLineFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        MACDLineFromCandle(std::size_t fast = 12, std::size_t slow = 26, std::size_t signal = 9)
+            : macd_(fast, slow, signal) {}
+        void update(const Candle &c) override { pack_ = macd_.update(c.close().value()); }
+        bool is_ready() const override { return pack_.has_value(); }
+        double value() const override { return pack_->macd; }
+        void reset() override
+        {
+            macd_.reset();
+            pack_.reset();
+        }
+
+    private:
+        MACD macd_;
+        std::optional<MACDValue> pack_;
+    };
+
+    class MACDSignalFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        MACDSignalFromCandle(std::size_t fast = 12, std::size_t slow = 26, std::size_t signal = 9)
+            : macd_(fast, slow, signal) {}
+        void update(const Candle &c) override { pack_ = macd_.update(c.close().value()); }
+        bool is_ready() const override { return pack_.has_value(); }
+        double value() const override { return pack_->signal; }
+        void reset() override
+        {
+            macd_.reset();
+            pack_.reset();
+        }
+
+    private:
+        MACD macd_;
+        std::optional<MACDValue> pack_;
+    };
+
+    // ---------- Bollinger upper and lower bands (uses close) ----------
+    class BollingerUpperFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        BollingerUpperFromCandle(std::size_t period = 20, double k = 2.0) : bb_(period, k) {}
+        void update(const Candle &c) override { bands_ = bb_.update(c.close().value()); }
+        bool is_ready() const override { return bands_.has_value(); }
+        double value() const override { return bands_->upper; }
+        void reset() override
+        {
+            bb_.reset();
+            bands_.reset();
+        }
+
+    private:
+        BollingerBands bb_;
+        std::optional<BollingerBands::Bands> bands_;
+    };
+
+    class BollingerLowerFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        BollingerLowerFromCandle(std::size_t period = 20, double k = 2.0) : bb_(period, k) {}
+        void update(const Candle &c) override { bands_ = bb_.update(c.close().value()); }
+        bool is_ready() const override { return bands_.has_value(); }
+        double value() const override { return bands_->lower; }
+        void reset() override
+        {
+            bb_.reset();
+            bands_.reset();
+        }
+
+    private:
+        BollingerBands bb_;
+        std::optional<BollingerBands::Bands> bands_;
+    };
+
+    // ---------- Directional indicators (uses H/L/C) ----------
+    // Note: ADXOut only starts being emitted once the ADX itself is seeded (bar 2N-1), so these
+    // become ready later than TA-Lib's +DI/-DI, which are available from bar N.
+    class ADXPlusDIFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        explicit ADXPlusDIFromCandle(std::size_t period = 14) : adx_(period) {}
+        void update(const Candle &c) override
+        {
+            pack_ = adx_.update(c.high().value(), c.low().value(), c.close().value());
+        }
+        bool is_ready() const override { return pack_.has_value(); }
+        double value() const override { return pack_->plusDI; }
+        void reset() override
+        {
+            adx_.reset();
+            pack_.reset();
+        }
+
+    private:
+        ADX adx_;
+        std::optional<ADXOut> pack_;
+    };
+
+    class ADXMinusDIFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        explicit ADXMinusDIFromCandle(std::size_t period = 14) : adx_(period) {}
+        void update(const Candle &c) override
+        {
+            pack_ = adx_.update(c.high().value(), c.low().value(), c.close().value());
+        }
+        bool is_ready() const override { return pack_.has_value(); }
+        double value() const override { return pack_->minusDI; }
+        void reset() override
+        {
+            adx_.reset();
+            pack_.reset();
+        }
+
+    private:
+        ADX adx_;
+        std::optional<ADXOut> pack_;
+    };
+
+    // ---------- Stochastic %D (uses H/L/C) ----------
+    class StochDFromCandle final : public IIndicatorScalarCandle
+    {
+    public:
+        StochDFromCandle(std::size_t k = 14, std::size_t d = 3) : st_(k, d) {}
+        void update(const Candle &c) override
+        {
+            last_ = st_.update(c.high().value(), c.low().value(), c.close().value());
+        }
+        bool is_ready() const override { return last_.has_value(); }
+        double value() const override { return last_->d; }
+        void reset() override
+        {
+            st_.reset();
+            last_.reset();
+        }
+
+    private:
+        Stochastic st_;
+        std::optional<StochOut> last_;
+    };
+
 } // namespace fin::indicators
 
 #endif // FIN_INDICATORS_ADAPTERS_CANDLE_ADAPTERS_HPP

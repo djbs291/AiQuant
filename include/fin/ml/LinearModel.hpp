@@ -43,14 +43,23 @@ namespace fin::ml
         // ...
         bool load_from_file(const std::string &path);
 
+        // Throws std::invalid_argument when the vector's feature set differs from the one the
+        // model file recorded. predict() stays permissive (it skips names it does not know), so
+        // call this on paths where a mismatched model should be refused rather than silently
+        // producing a prediction from a subset of the weights.
+        void validate_schema(const FeatureVector &features) const;
+
         [[nodiscard]] double bias() const noexcept { return bias_; }
         [[nodiscard]] const std::vector<double> &weights() const noexcept { return weights_; }
         [[nodiscard]] const std::vector<std::pair<std::string, double>> &named_weights() const noexcept { return named_weights_; }
+        // Feature order recorded by the model file, empty for files written before it existed.
+        [[nodiscard]] const std::vector<std::string> &feature_names() const noexcept { return feature_names_; }
 
     private:
         double bias_ = 0.0;
         std::vector<double> weights_{};
         std::vector<std::pair<std::string, double>> named_weights_{};
+        std::vector<std::string> feature_names_{};
         bool ready_ = false;
     };
 }

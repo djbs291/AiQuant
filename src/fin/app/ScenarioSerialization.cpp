@@ -49,6 +49,14 @@ namespace fin::app
         out << "  \"candles\": " << result.candles << ",\n";
         out << "  \"warmup_candles\": " << result.warmup_candles << ",\n";
         out << "  \"feature_rows\": " << result.feature_rows << ",\n";
+        out << "  \"features\": [";
+        for (std::size_t i = 0; i < result.features.size(); ++i)
+        {
+            if (i > 0)
+                out << ", ";
+            out << std::quoted(result.features[i]);
+        }
+        out << "],\n";
         out << "  \"training_samples\": " << result.training.samples << ",\n";
         out << "  \"validation_samples\": " << result.validation_samples << ",\n";
         out << "  \"training_mse\": " << result.training.mse << ",\n";

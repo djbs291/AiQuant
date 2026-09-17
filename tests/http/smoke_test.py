@@ -139,6 +139,11 @@ def main():
             status, body = request(port, "POST", "/run-file", "short.ini")
             check("POST /run-file (too few candles)", status, 422)
 
+            # An unparsable feature name is a client error, like any other bad INI.
+            status, body = request(port, "POST", "/run-config", f"ticks = {ticks}\nfeatures = close,bogus\n")
+            check("POST /run-config (unknown feature)", status, 400)
+            assert "bogus" in body, body
+
             status, body = request(port, "GET", "/run-config")
             check("GET /run-config", status, 405)
 

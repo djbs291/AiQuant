@@ -25,9 +25,11 @@ ctest --test-dir build -L unit          # or -L golden; -R matches the test name
 # Golden tests against TA-Lib (off by default; needs brew install ta-lib / setup-ta-lib)
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DAIQUANT_WITH_TALIB=ON
 
-# Sanitizers (mirrors .github/workflows/sanitizers.yml); keep the build dir outside the repo
+# Sanitizers (mirrors .github/workflows/sanitizers.yml); keep the build dir outside the repo.
+# FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER matters locally: see the note below.
 F="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
-cmake -S . -B /tmp/aiquant-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="$F" -DCMAKE_CXX_FLAGS="$F"
+cmake -S . -B /tmp/aiquant-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER \
+  -DCMAKE_C_FLAGS="$F" -DCMAKE_CXX_FLAGS="$F"
 cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-on-failure
 
 # CLI (subcommands: features, backtest, train-linear, run-mvp, run-config; run without args for usage)
@@ -53,6 +55,7 @@ A scenario needs enough candles to get through indicator warmup (about 33 with d
 - Tests build against **real Catch2 v3**. `FetchContent_Declare(... FIND_PACKAGE_ARGS 3)` prefers an installed Catch2 (`brew install catch2`, apt) and downloads v3.16.0 only when there is none, so a machine with the package configures offline. `catch_discover_tests` registers one ctest entry per `TEST_CASE`.
 - The **bundled 95-line "minicatch"** (`tests/catch2/catch.hpp`) survives as the no-network, no-package fallback: `-DAIQUANT_USE_BUNDLED_CATCH=ON`. It has a plain `int main()` that ignores arguments, so **filters don't work there** and the whole binary is one ctest entry; it supports only `TEST_CASE`, `REQUIRE`, `REQUIRE_FALSE` and `Approx(...).margin()`, with no `SECTION`. Anything a new test uses beyond that subset breaks this path — check it with the flag before relying on those features.
 - `#define CATCH_CONFIG_MAIN` in `tests/core/test_price.cpp` is **load-bearing for that fallback**: it is the only thing that makes minicatch emit `main()`. Real Catch2 ignores it and gets `main()` from `Catch2::Catch2WithMain`.
+- **ASan plus a system Catch2 gives false `container-overflow` reports.** With `brew install catch2`, `FIND_PACKAGE_ARGS` picks the prebuilt, *uninstrumented* library while your own code is instrumented, and ASan's container annotations need both sides instrumented. The reports fire inside `Catch::Config::Config` → `Catch::trim` while parsing the test name, before any test body runs, so no project code appears in the stack. Configure sanitizer builds with `-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER` so Catch2 is compiled with the same flags (this is what CI does, since the runners have no Catch2 installed), or set `ASAN_OPTIONS=detect_container_overflow=0`. Both make the suite pass; the first is the honest fix.
 - Always include `"catch2_compat.hpp"`, which picks the framework and bridges `Catch::Approx` so unqualified `Approx(...)` keeps compiling. Note minicatch's `Approx` is an absolute 1e-12 while Catch2's default epsilon is relative (~1.2e-5), so the same assertion is stricter under the fallback.
 - Tests that need a file on disk use `tests/TestTempFiles.hpp` (`test_files::TempFile`), which writes to the system temp dir and deletes the file on scope exit. Keep new tests on that helper: writing into the current working directory pollutes the repo when `aiquant_tests` is run from the root.
 - Sources and tests are collected with `file(GLOB_RECURSE)`, so re-run the CMake configure step after adding or removing `.cpp` files. Any new `tests/**/*.cpp` is compiled into the single `aiquant_tests` binary.
@@ -79,7 +82,7 @@ Front-ends: `src/main.cpp` (the `aiquant` CLI), `src/server/http_main.cpp` (`aiq
 
 The core pipeline is `fin::app::run_scenario` (`src/fin/app/ScenarioRunner.cpp`):
 1. `io::resample_csv_with_stats(ticks_path, timeframe)` builds the candles.
-2. `indicators::FeatureBus` turns each candle into a `FeatureRow` (close, ema_fast, rsi, macd, macd_signal, macd_hist). It returns `std::nullopt` during warmup.
+2. `indicators::FeatureBus` turns each candle into a `FeatureRow`. The feature set is configurable: the bus builds one indicator per name from the catalogue in `include/fin/indicators/FeatureSpec.hpp`, and the row carries its `FeatureSchema` so `FeatureVector` can name the columns. Without a `features` key the set is the historical six (close, ema_fast, rsi, macd, macd_signal, macd_hist), in that order. Warmup is all-or-nothing: `std::nullopt` until *every* selected indicator is ready. `FeatureRow::close` is kept outside `values` because the training target is `close[i+1] - close[i]`, which must hold even when `close` is not a selected feature.
 3. The first `train_ratio` of rows goes to `ml::train_linear_from_feature_rows`, a ridge regression on the target `next_close - close`.
 4. Validation RMSE and a preview are computed on the remaining rows.
 5. A second, fresh `FeatureBus` replays all candles. Each candle's model prediction is passed as the *pending* prediction to `Backtester::on_candle` for the **next** candle. The backtester maintains its own EMA/RSI and asks `SignalEngine::eval(snapshot, prediction)` for Buy/Sell/Hold.
@@ -93,10 +96,12 @@ When you change a config field, keep these in sync:
 - the Python dict conversion (`bindings/python/aiquant_module.cpp`)
 - `docs/ScenarioConfig.md`
 
+Adding a **feature** is a different list: register it in `feature_catalog()` (`src/fin/indicators/FeatureSpec.cpp`), give it an adapter in `adapters/CandleAdapters.hpp` if one does not exist, add any new period to `FeatureParams` *and* to `ScenarioConfig` (plus `make_feature_params` in `ScenarioRunner.cpp`), and document it in the catalogue table in `docs/ScenarioConfig.md`. Names are canonical and lowercase — no aliases, because the name is written verbatim into the model file.
+
 ## CI
 
-GitHub Actions runs on Ubuntu only:
-- `ci.yml`: Debug build + ctest.
+GitHub Actions:
+- `ci.yml`: Debug build + ctest, on **Ubuntu and macOS** (the macOS job arrived with PR #15).
 - `sanitizers.yml`: ASan/UBSan.
 - `coverage.yml`: gcov/lcov artifact.
 - `release.yml`: on `v*.*.*` tags, packages `build-rel` as a tarball.

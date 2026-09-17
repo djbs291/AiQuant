@@ -295,8 +295,11 @@ static int cmd_features(const std::vector<std::string> &args)
 
     fin::indicators::FeatureBus fb(ema_fast, rsi_period, macd_fast, macd_slow, macd_signal);
 
-    // Header
-    std::cout << "Timestamp, close, ema_fast, rsi, macd, macd_signal, macd_hist\n";
+    // Header follows the bus schema, so it stays correct whatever the feature set is.
+    std::cout << "Timestamp";
+    for (const auto &name : fb.schema().names)
+        std::cout << ", " << name;
+    std::cout << "\n";
     auto to_ms = [](const fin::core::Timestamp &ts) -> long long
     {
         using namespace std::chrono;
@@ -307,7 +310,10 @@ static int cmd_features(const std::vector<std::string> &args)
     {
         if (auto row = fb.update(c))
         {
-            std::cout << to_ms(row->ts) << ',' << row->close << ',' << row->ema_fast << ',' << row->rsi << ',' << row->macd << ',' << row->macd_signal << ',' << row->macd_hist << "\n";
+            std::cout << to_ms(row->ts);
+            for (double value : row->values)
+                std::cout << ',' << value;
+            std::cout << "\n";
         }
     }
     return 0;
@@ -380,7 +386,7 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--json]\n";
+        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
         return 2;
     }
 
@@ -426,6 +432,33 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
         cfg.trade_qty = *v;
     if (auto v = parse_double_flag(args, "--fee"))
         cfg.fee_per_trade = *v;
+
+    if (auto features = parse_string_flag(args, "--features"))
+    {
+        // Comma-separated, e.g. --features close,ema_fast,rsi,atr. Unknown names are rejected
+        // by the FeatureBus, which reports them through the catch below.
+        const std::string &list = *features;
+        std::size_t start = 0;
+        while (start <= list.size())
+        {
+            const std::size_t comma = list.find(',', start);
+            const std::size_t end = (comma == std::string::npos) ? list.size() : comma;
+            std::string name = list.substr(start, end - start);
+            const auto first = name.find_first_not_of(" \t");
+            const auto last = name.find_last_not_of(" \t");
+            if (first != std::string::npos)
+            {
+                name = name.substr(first, last - first + 1);
+                // Lowercase to match the INI parser, so --features RSI and rsi behave alike.
+                std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch)
+                               { return static_cast<char>(std::tolower(ch)); });
+                cfg.features.push_back(std::move(name));
+            }
+            if (comma == std::string::npos)
+                break;
+            start = comma + 1;
+        }
+    }
 
     if (auto out = parse_string_flag(args, "--model-out"))
         cfg.model_output_path = *out;

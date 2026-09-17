@@ -3,6 +3,7 @@
 #include <unordered_map>
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h> // std::vector<std::string> <-> list conversions for `features`
 
 #include "fin/api/ScenarioService.hpp"
 
@@ -97,6 +98,34 @@ namespace
         }
     }
 
+    bool set_string_list(const py::dict &dict, const char *name, std::vector<std::string> &target, std::string &error)
+    {
+        bool present = false;
+        py::object value = get_if_present(dict, name, &present);
+        if (!present)
+            return true;
+        if (value.is_none())
+        {
+            target.clear();
+            return true;
+        }
+        if (!py::isinstance<py::list>(value) && !py::isinstance<py::tuple>(value))
+        {
+            error = std::string(name) + " must be a list of strings";
+            return false;
+        }
+        try
+        {
+            target = value.cast<std::vector<std::string>>();
+            return true;
+        }
+        catch (const py::cast_error &)
+        {
+            error = std::string(name) + " must be a list of strings";
+            return false;
+        }
+    }
+
     bool set_bool(const py::dict &dict, const char *name, bool &target, std::string &error)
     {
         bool present = false;
@@ -183,6 +212,16 @@ namespace
         if (!set_optional_double(dict, "trade_qty", cfg.trade_qty, error)) return false;
         if (!set_optional_double(dict, "fee_per_trade", cfg.fee_per_trade, error)) return false;
         if (!set_size(dict, "validation_preview_limit", cfg.validation_preview_limit, error)) return false;
+        if (!set_string_list(dict, "features", cfg.features, error)) return false;
+        if (!set_size(dict, "sma_period", cfg.sma_period, error)) return false;
+        if (!set_size(dict, "bb_period", cfg.bb_period, error)) return false;
+        if (!set_double(dict, "bb_k", cfg.bb_k, error)) return false;
+        if (!set_size(dict, "atr_period", cfg.atr_period, error)) return false;
+        if (!set_size(dict, "adx_period", cfg.adx_period, error)) return false;
+        if (!set_size(dict, "stoch_k_period", cfg.stoch_k_period, error)) return false;
+        if (!set_size(dict, "stoch_d_period", cfg.stoch_d_period, error)) return false;
+        if (!set_size(dict, "zscore_period", cfg.zscore_period, error)) return false;
+        if (!set_size(dict, "momentum_period", cfg.momentum_period, error)) return false;
 
         if (py::object model = get_if_present(dict, "model_output_path", &present); present)
         {
@@ -212,6 +251,7 @@ namespace
         root["candles"] = result.candles;
         root["warmup_candles"] = result.warmup_candles;
         root["feature_rows"] = result.feature_rows;
+        root["features"] = result.features;
         root["training_samples"] = result.training.samples;
         root["validation_samples"] = result.validation_samples;
         root["training_mse"] = result.training.mse;
@@ -264,6 +304,16 @@ namespace
         if (cfg.fee_per_trade)
             dict["fee_per_trade"] = *cfg.fee_per_trade;
         dict["validation_preview_limit"] = cfg.validation_preview_limit;
+        dict["features"] = cfg.features;
+        dict["sma_period"] = cfg.sma_period;
+        dict["bb_period"] = cfg.bb_period;
+        dict["bb_k"] = cfg.bb_k;
+        dict["atr_period"] = cfg.atr_period;
+        dict["adx_period"] = cfg.adx_period;
+        dict["stoch_k_period"] = cfg.stoch_k_period;
+        dict["stoch_d_period"] = cfg.stoch_d_period;
+        dict["zscore_period"] = cfg.zscore_period;
+        dict["momentum_period"] = cfg.momentum_period;
         if (cfg.model_output_path)
             dict["model_output_path"] = *cfg.model_output_path;
         return dict;

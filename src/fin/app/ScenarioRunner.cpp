@@ -31,6 +31,42 @@ namespace fin::app
         }
     } // namespace
 
+    namespace
+    {
+        fin::indicators::FeatureParams make_feature_params(const ScenarioConfig &config)
+        {
+            fin::indicators::FeatureParams params{};
+            params.sma = config.sma_period;
+            params.ema_fast = config.ema_fast;
+            params.ema_slow = config.ema_slow;
+            params.rsi = config.rsi_period;
+            params.macd_fast = config.macd_fast;
+            params.macd_slow = config.macd_slow;
+            params.macd_signal = config.macd_signal;
+            params.bb_period = config.bb_period;
+            params.bb_k = config.bb_k;
+            params.atr = config.atr_period;
+            params.adx = config.adx_period;
+            params.stoch_k = config.stoch_k_period;
+            params.stoch_d = config.stoch_d_period;
+            params.zscore = config.zscore_period;
+            params.momentum = config.momentum_period;
+            return params;
+        }
+
+        std::string join_names(const std::vector<std::string> &names)
+        {
+            std::string out;
+            for (std::size_t i = 0; i < names.size(); ++i)
+            {
+                if (i > 0)
+                    out += ", ";
+                out += names[i];
+            }
+            return out;
+        }
+    }
+
     ScenarioResult run_scenario(const ScenarioConfig &config)
     {
         if (config.ticks_path.empty())
@@ -42,8 +78,13 @@ namespace fin::app
         ScenarioResult result{};
         result.candles = res.candles.size();
 
-        fin::indicators::FeatureBus feature_bus(config.ema_fast, config.rsi_period,
-                                                config.macd_fast, config.macd_slow, config.macd_signal);
+        const std::vector<std::string> &feature_names =
+            config.features.empty() ? fin::indicators::default_feature_names() : config.features;
+        const fin::indicators::FeatureParams feature_params = make_feature_params(config);
+
+        fin::indicators::FeatureBus feature_bus(feature_names, feature_params);
+        result.features = feature_bus.schema().names;
+
         std::vector<fin::indicators::FeatureRow> rows;
         rows.reserve(res.candles.size());
         for (const auto &c : res.candles)
@@ -53,7 +94,14 @@ namespace fin::app
         }
 
         if (rows.size() < 3)
-            throw std::runtime_error("Insufficient data after indicator warmup");
+        {
+            // Naming the set matters now that it is configurable: a long-warmup feature such as
+            // adx (2N-1 bars) can starve a file that was fine with the default six.
+            throw std::runtime_error("Insufficient data after indicator warmup: " +
+                                     std::to_string(res.candles.size()) + " candles produced only " +
+                                     std::to_string(rows.size()) + " feature rows for features [" +
+                                     join_names(feature_names) + "]");
+        }
 
         result.feature_rows = rows.size();
         result.warmup_candles = result.candles - rows.size();
@@ -65,7 +113,19 @@ namespace fin::app
         fin::ml::LinearTrainingOptions train_opts{};
         train_opts.ridge_lambda = config.ridge_lambda;
 
-        fin::ml::LinearTrainingSummary training_summary = fin::ml::train_linear_from_feature_rows(training, train_opts);
+        fin::ml::LinearTrainingSummary training_summary;
+        try
+        {
+            training_summary = fin::ml::train_linear_from_feature_rows(training, train_opts);
+        }
+        catch (const std::runtime_error &ex)
+        {
+            // The solver refuses singular systems, which wide and near-collinear feature sets
+            // make much easier to hit, so say what was being solved.
+            throw std::runtime_error(std::string(ex.what()) + " (" + std::to_string(feature_names.size()) +
+                                     " features: [" + join_names(feature_names) +
+                                     "]; try a larger ridge or fewer correlated features)");
+        }
         result.training = training_summary;
 
         double sse = 0.0;
@@ -122,8 +182,9 @@ namespace fin::app
 
         fin::backtest::Backtester bt(btcfg, engine);
 
-        fin::indicators::FeatureBus live_bus(config.ema_fast, config.rsi_period,
-                                             config.macd_fast, config.macd_slow, config.macd_signal);
+        // Same feature set as training: if these two ever diverged, the backtest would feed the
+        // model something it was not trained on.
+        fin::indicators::FeatureBus live_bus(feature_names, feature_params);
         std::optional<double> pending_prediction;
 
         for (const auto &c : res.candles)

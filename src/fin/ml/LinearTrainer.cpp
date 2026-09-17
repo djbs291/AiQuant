@@ -85,6 +85,16 @@ namespace fin::ml
         const std::size_t feature_count = features.front().values.size();
         const std::size_t augmented = feature_count + 1; // +1 for bias term
         const std::size_t samples = rows.size() - 1;
+
+        // With a configurable feature set this is reachable: a wide set on a short file leaves
+        // fewer samples than columns, which is underdetermined. Say so, rather than letting it
+        // surface as an opaque "failed to solve normal equations" further down.
+        if (samples < augmented)
+        {
+            throw std::runtime_error("Not enough samples to fit " + std::to_string(feature_count) +
+                                     " features: need at least " + std::to_string(augmented) +
+                                     " samples (features + bias) but have " + std::to_string(samples));
+        }
         Matrix XtX = make_matrix(augmented);
         std::vector<double> Xty(augmented, 0.0);
 
@@ -147,10 +157,21 @@ namespace fin::ml
             return false;
 
         out << "# AiQuant LinearModel weights\n";
+
+        const auto &named = model.named_weights();
+        if (!named.empty())
+        {
+            // Record the feature set so a model cannot be silently applied to a different one.
+            // It is a comment, so older readers skip it and older files still load.
+            out << "# features:";
+            for (std::size_t i = 0; i < named.size(); ++i)
+                out << (i == 0 ? " " : ",") << named[i].first;
+            out << "\n";
+        }
+
         out << std::setprecision(12);
         out << "bias," << model.bias() << "\n";
 
-        const auto &named = model.named_weights();
         if (!named.empty())
         {
             for (const auto &[name, weight] : named)
