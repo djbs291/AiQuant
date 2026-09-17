@@ -66,6 +66,18 @@ def main():
         expect_raises(ValueError, aq.run_config, {"ticks_path": ticks, "timeframe": "X9"})
         expect_raises(RuntimeError, aq.load_file, os.path.join(tmp, "missing.ini"))
 
+        # Configurable feature set: the list goes in and the resolved set comes back.
+        assert from_dict["features"] == ["close", "ema_fast", "rsi", "macd", "macd_signal", "macd_hist"], from_dict["features"]
+
+        wanted = ["close", "ema_fast", "rsi", "atr"]
+        wide = aq.run_config({"ticks_path": ticks, "timeframe": "M1", "features": wanted})
+        check_result(wide)
+        assert wide["features"] == wanted, wide["features"]
+
+        # A bare string would otherwise iterate into single characters.
+        expect_raises(ValueError, aq.run_config, {"ticks_path": ticks, "features": "close,rsi"})
+        expect_raises(ValueError, aq.run_config, {"ticks_path": ticks, "features": ["close", "bogus"]})
+
     m = from_dict["metrics"]
     print(f"aiquant_api OK: {from_dict['candles']} candles, {m['trades']} trades, pnl {m['pnl']:.2f}")
     return 0
