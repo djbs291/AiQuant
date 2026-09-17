@@ -107,6 +107,6 @@ The target architecture is described in `docs/CppFinancialAIEngine.md`, with per
 - **Modelling:** ✅ the `FeatureBus` feature set is configurable — `features = close,ema_fast,rsi,atr,adx` selects any of the 20 names in `feature_catalog()`, the resolved set is reported in the JSON and recorded in the model file, and omitting the key reproduces the previous numbers exactly. ⬜ Still open: implement `IModel::fit` / `partial_fit` for online learning, and add richer models (the doc mentions MLP).
 - **Streaming:** real-time pipeline (tick feed → resampler → indicators → model → signal dispatch), parallel per-symbol workers, lock-free MPMC queues, no allocations on the hot path, SIMD (NEON/AVX).
 - **IO:** JSON reader, volume/tick/event bars, WebSocket feed, Kafka/Redis connectors.
-- **Interfaces:** HTTP `/predict` and `/signal` endpoints, an `examples/` directory, a signals dashboard.
+- **Interfaces:** ✅ HTTP `/predict` and `/signal`, taking JSON and backed by `fin::api::PredictService` (so the logic is testable without a server). They brought the project's first JSON *reader*, `fin::app::json`, which is strict by design: it caps nesting depth, refuses trailing content, and reports errors instead of throwing. ⬜ Still open: an `examples/` directory and a signals dashboard.
 - **Trading:** portfolio risk models, multi-asset simulation, order execution and broker APIs.
 - **Quality:** property-based tests and fuzzing of the CSV/INI readers and streaming update paths.
