@@ -24,6 +24,21 @@ namespace fin::app
         std::size_t macd_slow = 26;
         std::size_t macd_signal = 9;
 
+        // Model feature set, by name. Empty means the historical six, so scenarios written
+        // before this existed keep training exactly the same model.
+        std::vector<std::string> features;
+
+        // Periods for the indicators only the feature list can reach.
+        std::size_t sma_period = 14;
+        std::size_t bb_period = 20;
+        double bb_k = 2.0;
+        std::size_t atr_period = 14;
+        std::size_t adx_period = 14;
+        std::size_t stoch_k_period = 14;
+        std::size_t stoch_d_period = 3;
+        std::size_t zscore_period = 20;
+        std::size_t momentum_period = 10;
+
         double rsi_buy = 30.0;
         double rsi_sell = 70.0;
         bool use_ema_crossover = true;
@@ -48,6 +63,8 @@ namespace fin::app
         std::size_t candles = 0;
         std::size_t warmup_candles = 0;
         std::size_t feature_rows = 0;
+        // The feature set actually used, resolved from the config (reported in the JSON).
+        std::vector<std::string> features;
 
         std::size_t validation_samples = 0;
         double validation_rmse = 0.0;

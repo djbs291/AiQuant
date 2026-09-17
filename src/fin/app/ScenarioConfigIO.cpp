@@ -5,8 +5,10 @@
 #include <charconv>
 #include <fstream>
 #include <optional>
+#include <sstream>
 
 #include "fin/app/ScenarioUtils.hpp"
+#include "fin/indicators/FeatureSpec.hpp" // find_feature: reject unknown feature names
 
 namespace fin::app
 {
@@ -58,6 +60,51 @@ namespace fin::app
             const char *end = begin + text.size();
             auto [ptr, ec] = std::from_chars(begin, end, out);
             return ec == std::errc{} && ptr == end;
+        }
+
+        // Comma-separated list, lowercased and trimmed. Empty items are rejected rather than
+        // skipped, so `a,,b` is a typo the user hears about.
+        bool parse_list_value(const std::string &text, std::vector<std::string> &out, std::string &error)
+        {
+            std::vector<std::string> items;
+            std::istringstream stream(text);
+            std::string item;
+            while (std::getline(stream, item, ','))
+            {
+                trim_inplace(item);
+                if (item.empty())
+                {
+                    error = "empty item in list";
+                    return false;
+                }
+                std::transform(item.begin(), item.end(), item.begin(), [](unsigned char ch)
+                               { return static_cast<char>(std::tolower(ch)); });
+                items.push_back(item);
+            }
+
+            if (items.empty())
+            {
+                error = "list is empty";
+                return false;
+            }
+
+            // A repeated feature makes two identical columns, which is exactly singular. The
+            // ridge term hides it just enough that the weight gets split arbitrarily between
+            // the twins instead of failing, so reject it here.
+            for (std::size_t i = 0; i < items.size(); ++i)
+            {
+                for (std::size_t j = i + 1; j < items.size(); ++j)
+                {
+                    if (items[i] == items[j])
+                    {
+                        error = "duplicate item '" + items[i] + "'";
+                        return false;
+                    }
+                }
+            }
+
+            out = std::move(items);
+            return true;
         }
     } // namespace
 
@@ -112,6 +159,97 @@ namespace fin::app
             if (lowered == "ticks" || lowered == "ticks_path" || lowered == "data")
             {
                 cfg.ticks_path = value;
+            }
+            else if (lowered == "features")
+            {
+                std::string list_error;
+                if (!parse_list_value(value, cfg.features, list_error))
+                {
+                    error = "Invalid features at line " + std::to_string(line_no) + ": " + list_error;
+                    return false;
+                }
+                // An unknown key is ignored silently, but an unknown *feature* is not: dropping
+                // it would quietly train a different model than the one asked for.
+                for (const auto &name : cfg.features)
+                {
+                    if (fin::indicators::find_feature(name) == nullptr)
+                    {
+                        error = "Unknown feature '" + name + "' at line " + std::to_string(line_no);
+                        return false;
+                    }
+                }
+            }
+            else if (lowered == "sma" || lowered == "sma_period")
+            {
+                if (!parse_size_value(value, cfg.sma_period))
+                {
+                    error = "Invalid sma period at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "bb_period")
+            {
+                if (!parse_size_value(value, cfg.bb_period))
+                {
+                    error = "Invalid bb_period at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "bb_k")
+            {
+                if (!parse_double_value(value, cfg.bb_k))
+                {
+                    error = "Invalid bb_k at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "atr" || lowered == "atr_period")
+            {
+                if (!parse_size_value(value, cfg.atr_period))
+                {
+                    error = "Invalid atr period at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "adx" || lowered == "adx_period")
+            {
+                if (!parse_size_value(value, cfg.adx_period))
+                {
+                    error = "Invalid adx period at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "stoch_k" || lowered == "stoch_k_period")
+            {
+                if (!parse_size_value(value, cfg.stoch_k_period))
+                {
+                    error = "Invalid stoch_k period at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "stoch_d" || lowered == "stoch_d_period")
+            {
+                if (!parse_size_value(value, cfg.stoch_d_period))
+                {
+                    error = "Invalid stoch_d period at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "zscore" || lowered == "zscore_period")
+            {
+                if (!parse_size_value(value, cfg.zscore_period))
+                {
+                    error = "Invalid zscore period at line " + std::to_string(line_no);
+                    return false;
+                }
+            }
+            else if (lowered == "momentum" || lowered == "momentum_period")
+            {
+                if (!parse_size_value(value, cfg.momentum_period))
+                {
+                    error = "Invalid momentum period at line " + std::to_string(line_no);
+                    return false;
+                }
             }
             else if (lowered == "tf" || lowered == "timeframe")
             {
