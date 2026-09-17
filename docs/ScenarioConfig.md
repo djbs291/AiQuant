@@ -34,6 +34,27 @@ key = value  # optional inline comment
 | `fee`, `fee_per_trade` | double | engine default | Flat fee per trade. |
 | `model_out`, `model_output` | string | none | Save trained linear model to this path. |
 | `preview`, `preview_limit` | size_t | `3` | Rows of validation preview copied to stdout. |
+| `features` | list | `close,ema_fast,rsi,macd,macd_signal,macd_hist` | Comma-separated model feature set, in column order. An unknown name is an error (unlike an unknown key, which is ignored). See the catalogue below. |
+| `sma`, `sma_period` | size_t | `14` | SMA period, for the `sma` feature. |
+| `bb_period` | size_t | `20` | Bollinger period, for `bb_upper`/`bb_mid`/`bb_lower`. |
+| `bb_k` | double | `2.0` | Bollinger band width in standard deviations. |
+| `atr`, `atr_period` | size_t | `14` | ATR period. |
+| `adx`, `adx_period` | size_t | `14` | ADX period, also used by `plus_di`/`minus_di`. |
+| `stoch_k`, `stoch_k_period` | size_t | `14` | Stochastic %K period. |
+| `stoch_d`, `stoch_d_period` | size_t | `3` | Stochastic %D period. |
+| `zscore`, `zscore_period` | size_t | `20` | Z-Score window. |
+| `momentum`, `momentum_period` | size_t | `10` | Momentum lookback. |
+
+## Feature catalogue
+
+`features` accepts these names: `close`, `sma`, `ema_fast`, `ema_slow`, `rsi`, `macd`, `macd_signal`, `macd_hist`, `bb_upper`, `bb_mid`, `bb_lower`, `atr`, `adx`, `plus_di`, `minus_di`, `stoch_k`, `stoch_d`, `vwap`, `zscore`, `momentum`.
+
+Two things to keep in mind:
+
+- **Warmup is all-or-nothing.** A row is emitted only once *every* selected feature is ready, so adding a long-warmup indicator shortens the usable series. `adx` needs `2N-1` candles, and with the default period that is 27 before the first row. The resolved set and the row counts are reported in the JSON output and in the error raised when too few rows survive.
+- **`vwap` is session-scoped.** It accumulates from the first candle and only restarts when the bus is reset, so on a long file it drifts toward a whole-file average rather than a daily one.
+
+The order of the list is the column order of the model, and it is recorded in the trained model file.
 
 ## Boolean Parsing
 
