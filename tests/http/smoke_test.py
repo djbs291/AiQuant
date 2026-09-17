@@ -61,9 +61,115 @@ def request(port, method, path, body=None):
         conn.close()
 
 
+def get_with_headers(port, path):
+    """GET that also returns the response headers, for checking Content-Type."""
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+    try:
+        conn.request("GET", path)
+        response = conn.getresponse()
+        return response.status, dict(response.getheaders()), response.read().decode()
+    finally:
+        conn.close()
+
+
 def check(label, got, expected):
     assert got == expected, f"{label}: expected {expected}, got {got}"
     print(f"  ok  {label} -> {got}")
+
+
+def start_server(args):
+    """Starts the server on a free port and waits for it to listen."""
+    port = free_port()
+    proc = subprocess.Popen([SERVER, "--port", str(port)] + args,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        wait_until_ready(port, proc)
+    except Exception:
+        proc.terminate()
+        raise
+    return port, proc
+
+
+def stop_server(proc):
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def check_static(tmp):
+    """Static serving is off unless --static is given, and confined to it when it is."""
+    static_root = os.path.join(tmp, "static")
+    os.mkdir(static_root)
+    with open(os.path.join(static_root, "index.html"), "w") as f:
+        f.write('<!DOCTYPE html>\n<title>AiQuant</title>\n<p id="marker">dashboard</p>\n')
+    with open(os.path.join(static_root, "app.js"), "w") as f:
+        f.write("// app\n")
+    with open(os.path.join(static_root, "notes.md"), "w") as f:
+        f.write("markdown is not on the whitelist\n")
+    with open(os.path.join(static_root, "icon.svg"), "w") as f:
+        f.write("<svg xmlns='http://www.w3.org/2000/svg'></svg>\n")  # svg can carry script
+    with open(os.path.join(static_root, ".hidden.txt"), "w") as f:
+        f.write("dotfiles are refused even with a whitelisted extension\n")
+
+    secret = os.path.join(tmp, "secret.txt")
+    with open(secret, "w") as f:
+        f.write("should never be served\n")
+    # A symlink pointing out of the directory must be refused, not followed.
+    os.symlink(secret, os.path.join(static_root, "link.txt"))
+
+    # Off by default: a GET is just a wrong method.
+    port, proc = start_server(["--root", tmp])
+    try:
+        check("GET / without --static", request(port, "GET", "/")[0], 405)
+        check("GET /health without --static", request(port, "GET", "/health")[0], 200)
+    finally:
+        stop_server(proc)
+
+    port, proc = start_server(["--root", tmp, "--static", static_root])
+    try:
+        status, headers, body = get_with_headers(port, "/")
+        check("GET / with --static", status, 200)
+        assert "text/html" in headers.get("Content-Type", ""), headers
+        assert "marker" in body, body
+
+        status, headers, _ = get_with_headers(port, "/app.js")
+        check("GET /app.js", status, 200)
+        assert "javascript" in headers.get("Content-Type", ""), headers
+
+        check("GET /health with --static", request(port, "GET", "/health")[0], 200)
+        check("GET /missing.html", request(port, "GET", "/missing.html")[0], 404)
+        check("GET /notes.md (not whitelisted)", request(port, "GET", "/notes.md")[0], 404)
+        check("GET /link.txt (symlink out of the dir)", request(port, "GET", "/link.txt")[0], 403)
+        check("GET /../secret.txt", request(port, "GET", "/../secret.txt")[0], 403)
+        check("GET percent-encoded path", request(port, "GET", "/%2e%2e/secret.txt")[0], 400)
+        check("GET directory", request(port, "GET", "/sub/")[0], 404)
+        check("POST / with --static", request(port, "POST", "/", "x")[0], 404)
+        check("GET /icon.svg (svg is off the whitelist)", request(port, "GET", "/icon.svg")[0], 404)
+        check("GET /.hidden.txt (dotfile)", request(port, "GET", "/.hidden.txt")[0], 404)
+
+        # An API route asked for with the wrong method stays 405: static serving must not
+        # swallow it and answer "no such file".
+        check("GET /predict with --static", request(port, "GET", "/predict")[0], 405)
+        check("GET /run-config with --static", request(port, "GET", "/run-config")[0], 405)
+
+        # Security headers travel with every static response.
+        _, headers, _ = get_with_headers(port, "/index.html")
+        assert headers.get("X-Content-Type-Options") == "nosniff", headers
+        assert "default-src 'self'" in headers.get("Content-Security-Policy", ""), headers
+        print("  ok  static responses carry nosniff and a CSP")
+
+        assert proc.poll() is None, "server died serving static files"
+    finally:
+        stop_server(proc)
+
+    # The page the README points at must actually be there.
+    dashboard = os.path.join("examples", "dashboard")
+    if os.path.isdir(dashboard):
+        for name in ("index.html", "app.css", "app.js"):
+            assert os.path.exists(os.path.join(dashboard, name)), f"missing {name}"
+        print("  ok  examples/dashboard is present")
 
 
 def main():
@@ -228,11 +334,9 @@ def main():
 
             assert proc.poll() is None, "server died during the run"
         finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            stop_server(proc)
+
+        check_static(tmp)
 
     print("aiquant_http OK")
     return 0
