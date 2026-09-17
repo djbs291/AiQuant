@@ -4,6 +4,7 @@
 
 #include "fin/io/Pipeline.hpp" // resample_csv_m1_with_stats(...)
 #include "fin/indicators/FeatureBus.hpp"
+#include "fin/ml/FeatureVector.hpp"
 #include "fin/core/Candle.hpp"
 
 TEST_CASE("Tick CSV -> M1 Candles -> FeatureBus emits rows", "[pipeline][features]")
@@ -34,9 +35,18 @@ TEST_CASE("Tick CSV -> M1 Candles -> FeatureBus emits rows", "[pipeline][feature
             rows.push_back(*fr);
 
     REQUIRE(rows.size() >= 1); // should emit once slow EMA (5) + signal (2) are ready
-    const auto &last = rows.back();
-    REQUIRE(last.close >= last.ema_fast);
-    REQUIRE(last.rsi > 50.0);       // rising series → RSI > 50
-    REQUIRE(last.macd >= 0.0);      // rising series → MACD positive
-    REQUIRE(last.macd_hist >= -1e-9); // allow tiny numerical noise around zero
+
+    // The row carries its schema, so features are read by name rather than by member.
+    REQUIRE(fb.schema().names == fin::indicators::default_feature_names());
+    const auto last = fin::ml::FeatureVector::from_feature_row(rows.back());
+    const auto value = [&last](const char *name) {
+        auto v = last.value_of(name);
+        REQUIRE(v.has_value());
+        return *v;
+    };
+
+    REQUIRE(rows.back().close >= value("ema_fast"));
+    REQUIRE(value("rsi") > 50.0);        // rising series → RSI > 50
+    REQUIRE(value("macd") >= 0.0);       // rising series → MACD positive
+    REQUIRE(value("macd_hist") >= -1e-9); // allow tiny numerical noise around zero
 }

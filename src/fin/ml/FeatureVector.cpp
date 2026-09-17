@@ -22,8 +22,10 @@ namespace fin::ml
     {
         FeatureVector fv;
         fv.ts = row.ts;
-        fv.names = {"close", "ema_fast", "rsi", "macd", "macd_signal", "macd_hist"};
-        fv.values = {row.close, row.ema_fast, row.rsi, row.macd, row.macd_signal, row.macd_hist};
+        // The names travel with the row's schema, so any feature set works here unchanged.
+        if (row.schema)
+            fv.names = row.schema->names;
+        fv.values = row.values;
         return fv;
     }
 }
