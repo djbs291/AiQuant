@@ -65,10 +65,12 @@ jobs:
       - name: Test
         run: ctest --test-dir build-cov --output-on-failure
 
-      # The server is linked with --coverage but ctest never executes it, so its lines counted
-      # as dead weight. Running the smoke test here covers them.
-      - name: HTTP service smoke test
-        run: AIQUANT_BUILD_DIR=build-cov python3 tests/http/smoke_test.py
+      # No HTTP smoke test here, deliberately. The smoke test stops the server with SIGTERM,
+      # and gcov only flushes counters on a normal exit, so the server writes no .gcda and the
+      # report gains nothing — verified by building with --coverage and checking that
+      # http_main.cpp.gcda is never created. Covering it would mean making the server exit
+      # normally on SIGTERM, which is a change to production behaviour for tooling's sake.
+      # The same step in sanitizers.yml does work: ASan and UBSan report as they run.
 
       - name: Capture coverage
         run: |
