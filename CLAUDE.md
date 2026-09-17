@@ -38,9 +38,9 @@ cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-o
 ./build/aiquant run-config scenario.ini --json | jq .metrics
 ./build/aiquant backtest ticks.csv --model-linear model.csv
 
-# HTTP: GET /health; POST /run-file (body = INI path, must resolve under --root) and
-# POST /run-config (body = raw INI). --root defaults to the working directory.
-./build/aiquant_http --port 8080 --root scenarios [--max-body 1048576] [--max-connections 32]
+# HTTP: GET /health; POST /run-file (body = INI path under --root), POST /run-config (raw INI),
+# and POST /predict + /signal, which take JSON (see README). --root defaults to the cwd.
+./build/aiquant_http --port 8080 --root scenarios --model model.csv [--max-body 1048576] [--max-connections 32]
 python3 tests/http/smoke_test.py   # endpoint + status-code smoke test, also run by ci.yml (not by ctest)
 
 # Python: use the same interpreter CMake found (printed as "Found Python3" at configure time)

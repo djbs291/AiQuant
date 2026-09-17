@@ -71,18 +71,42 @@ Use the interpreter CMake found (printed as `Found Python3` at configure time); 
 `aiquant_http` exposes the scenario runner over HTTP. Example usage:
 
 ```bash
-./build/aiquant_http --port 8080 --root scenarios &
+./build/aiquant_http --port 8080 --root scenarios --model model.csv &
 curl http://localhost:8080/health                                              # liveness
 curl -X POST http://localhost:8080/run-file --data "mvp.ini"                   # body = path under --root
 curl -X POST http://localhost:8080/run-config --data-binary @scenarios/mvp.ini # body = raw INI
+curl -X POST http://localhost:8080/predict -d '{"features": {"close": 100, "rsi": 55}}'
+curl -X POST http://localhost:8080/signal  -d '{"close": 100, "rsi": 20, "ema_fast": 11, "ema_slow": 10}'
 ```
+
+### `/predict` and `/signal`
+
+These two take a **JSON object** (the scenario endpoints keep taking INI) and answer with JSON.
+
+`POST /predict` applies a trained model to one set of feature values:
+
+```json
+{"model": "model.csv", "features": {"close": 100.0, "rsi": 55.0}}
+```
+
+`model` is optional and resolves under `--root`, exactly like `/run-file`; without it the `--model` given at startup is used. The values are reordered to the column order recorded in the model file, and a missing or unexpected feature is a `400` naming it — the model is never applied to a feature set it was not trained on. The reply carries `prediction`, the `features` order actually used, and the `model` path.
+
+`POST /signal` evaluates the rule engine:
+
+```json
+{"close": 100.0, "rsi": 20.0, "ema_fast": 11.0, "ema_slow": 10.0,
+ "prediction": 0.5, "rsi_buy": 30.0, "rsi_sell": 70.0, "use_ema_crossover": true}
+```
+
+Every field is optional. Supply `prediction` to evaluate the rules against a number you already have, or supply `features` (plus `model`) and the service predicts first. With neither, it answers on the indicator rules alone. The reply carries `signal` (`Buy`/`Sell`/`Hold`), `score`, `reason`, `symbol`, `prediction` (or `null`) and `features`.
 
 `POST /run-file` takes a path to a scenario file; it is resolved against `--root` (default: the working directory) and anything outside that directory is refused. `POST /run-config` accepts raw INI contents and executes them via a temporary file. Both return the JSON emitted by the CLI `--json` flag.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--port` | 8080 | TCP port |
-| `--root` | working directory | directory `/run-file` may read scenarios from |
+| `--root` | working directory | directory `/run-file` and request-supplied model paths resolve under |
+| `--model` | none | default model for `/predict` and `/signal` |
 | `--max-body` | 1048576 | maximum request body in bytes |
 | `--max-connections` | 32 | requests served concurrently before answering 503 |
 
