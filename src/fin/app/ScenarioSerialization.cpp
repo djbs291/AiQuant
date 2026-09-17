@@ -57,10 +57,16 @@ namespace fin::app
             out << std::quoted(result.features[i]);
         }
         out << "],\n";
+        out << "  \"model\": " << std::quoted(result.model) << ",\n";
+        out << "  \"online_update\": " << (result.online_update ? "true" : "false") << ",\n";
+        out << "  \"online_updates\": " << result.online_updates << ",\n";
         out << "  \"training_samples\": " << result.training.samples << ",\n";
         out << "  \"validation_samples\": " << result.validation_samples << ",\n";
         out << "  \"training_mse\": " << result.training.mse << ",\n";
         out << "  \"validation_rmse\": " << result.validation_rmse << ",\n";
+        // Zero unless online updating is on, where it is the predict-then-learn error over
+        // the same rows validation_rmse scores with the frozen model.
+        out << "  \"online_validation_rmse\": " << result.online_validation_rmse << ",\n";
         append_metrics_json(out, result);
         out << "  \"model_saved\": " << (result.model_saved ? "true" : "false") << ",\n";
         out << "  \"validation_preview\": [\n";

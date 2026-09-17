@@ -2,7 +2,10 @@
 
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 #include "fin/indicators/FeatureBus.hpp"
 #include "fin/ml/FeatureVector.hpp"
@@ -72,11 +75,20 @@ namespace fin::app
         if (config.ticks_path.empty())
             throw std::invalid_argument("ScenarioConfig.ticks_path is empty");
 
+        if (config.online_update && config.model != ModelKind::Sgd)
+        {
+            // Accepting it silently would report an online run whose model never moved.
+            throw std::invalid_argument("online_update requires model = sgd: the ridge model is a "
+                                        "closed-form fit with no partial_fit to call");
+        }
+
         fin::io::TickCsvOptions csv_opt{};
         auto res = fin::io::resample_csv_with_stats(config.ticks_path, config.timeframe, csv_opt);
 
         ScenarioResult result{};
         result.candles = res.candles.size();
+        result.model = (config.model == ModelKind::Sgd) ? "sgd" : "ridge";
+        result.online_update = config.online_update;
 
         const std::vector<std::string> &feature_names =
             config.features.empty() ? fin::indicators::default_feature_names() : config.features;
@@ -110,21 +122,50 @@ namespace fin::app
         auto train_end = rows.begin() + static_cast<std::vector<fin::indicators::FeatureRow>::difference_type>(train_rows + 1);
         std::vector<fin::indicators::FeatureRow> training(rows.begin(), train_end);
 
-        fin::ml::LinearTrainingOptions train_opts{};
-        train_opts.ridge_lambda = config.ridge_lambda;
-
         fin::ml::LinearTrainingSummary training_summary;
-        try
+        // Kept beside the exported LinearModel because it is the only one that can go on
+        // learning: everything downstream reads the export, the online phase reads this.
+        std::optional<fin::ml::SgdRegressor> sgd_model;
+
+        if (config.model == ModelKind::Sgd)
         {
-            training_summary = fin::ml::train_linear_from_feature_rows(training, train_opts);
+            fin::ml::SgdTrainingSummary sgd_summary;
+            try
+            {
+                sgd_summary = fin::ml::train_sgd_from_feature_rows(training, config.sgd);
+            }
+            catch (const std::exception &ex)
+            {
+                // Divergence names the learning rate itself; add what it was fitting.
+                throw std::runtime_error(std::string(ex.what()) + " (sgd over " +
+                                         std::to_string(feature_names.size()) + " features: [" +
+                                         join_names(feature_names) + "])");
+            }
+
+            // The reported weights, --model-out and /predict all go through the folded
+            // equivalent, so an SGD run is served exactly like a ridge one.
+            training_summary.model = sgd_summary.model.to_linear_model();
+            training_summary.mse = sgd_summary.mse;
+            training_summary.samples = sgd_summary.samples;
+            sgd_model = std::move(sgd_summary.model);
         }
-        catch (const std::runtime_error &ex)
+        else
         {
-            // The solver refuses singular systems, which wide and near-collinear feature sets
-            // make much easier to hit, so say what was being solved.
-            throw std::runtime_error(std::string(ex.what()) + " (" + std::to_string(feature_names.size()) +
-                                     " features: [" + join_names(feature_names) +
-                                     "]; try a larger ridge or fewer correlated features)");
+            fin::ml::LinearTrainingOptions train_opts{};
+            train_opts.ridge_lambda = config.ridge_lambda;
+
+            try
+            {
+                training_summary = fin::ml::train_linear_from_feature_rows(training, train_opts);
+            }
+            catch (const std::runtime_error &ex)
+            {
+                // The solver refuses singular systems, which wide and near-collinear feature sets
+                // make much easier to hit, so say what was being solved.
+                throw std::runtime_error(std::string(ex.what()) + " (" + std::to_string(feature_names.size()) +
+                                         " features: [" + join_names(feature_names) +
+                                         "]; try a larger ridge or fewer correlated features)");
+            }
         }
         result.training = training_summary;
 
@@ -134,6 +175,14 @@ namespace fin::app
         if (preview_limit == 0)
             preview_limit = 3;
 
+        // Prequential scoring on its own copy: predict the sample, then learn from it. The
+        // backtest replay below starts again from the trained state, so the updates made here
+        // must not be the ones it depends on.
+        std::optional<fin::ml::SgdRegressor> prequential;
+        if (config.online_update && sgd_model)
+            prequential = *sgd_model;
+        double online_sse = 0.0;
+
         for (std::size_t i = train_rows; i + 1 < rows.size(); ++i)
         {
             auto fv = fin::ml::FeatureVector::from_feature_row(rows[i]);
@@ -142,6 +191,13 @@ namespace fin::app
             const double err = pred - target;
             sse += err * err;
             ++validation_samples;
+
+            if (prequential)
+            {
+                const double online_err = prequential->predict(fv) - target;
+                online_sse += online_err * online_err;
+                prequential->partial_fit(fv, target);
+            }
 
             if (result.validation_preview.size() < preview_limit)
             {
@@ -153,10 +209,16 @@ namespace fin::app
 
         result.validation_samples = validation_samples;
         if (validation_samples > 0)
+        {
             result.validation_rmse = std::sqrt(sse / static_cast<double>(validation_samples));
+            if (prequential)
+                result.online_validation_rmse = std::sqrt(online_sse / static_cast<double>(validation_samples));
+        }
 
         if (config.model_output_path)
         {
+            // The model as trained, before any online update: the file is the artifact of the
+            // training run, not of the replay that follows it.
             if (!fin::ml::save_linear_model(training_summary.model, *config.model_output_path))
                 throw std::runtime_error("Failed to persist linear model to " + *config.model_output_path);
             result.model_saved = true;
@@ -187,14 +249,38 @@ namespace fin::app
         fin::indicators::FeatureBus live_bus(feature_names, feature_params);
         std::optional<double> pending_prediction;
 
+        // The deployed copy: it starts where training left off and learns only from candles
+        // the training pass never saw.
+        std::optional<fin::ml::SgdRegressor> live_model;
+        if (config.online_update && sgd_model)
+            live_model = *sgd_model;
+
+        // A row's target is only realized when the next row closes, so the update always runs
+        // one row behind. That is what keeps the replay free of lookahead.
+        std::optional<fin::indicators::FeatureRow> previous_row;
+        std::size_t emitted_rows = 0;
+
         for (const auto &c : res.candles)
         {
             bt.on_candle(c, pending_prediction);
 
             if (auto row = live_bus.update(c))
             {
+                // emitted_rows > train_rows means the previous row is past the training split.
+                // Re-learning the training rows here would only be extra passes over data the
+                // model has already fitted.
+                if (live_model && previous_row && emitted_rows > train_rows)
+                {
+                    auto prev_fv = fin::ml::FeatureVector::from_feature_row(*previous_row);
+                    live_model->partial_fit(prev_fv, row->close - previous_row->close);
+                    ++result.online_updates;
+                }
+
                 auto fv = fin::ml::FeatureVector::from_feature_row(*row);
-                pending_prediction = training_summary.model.predict(fv);
+                pending_prediction = live_model ? live_model->predict(fv)
+                                                : training_summary.model.predict(fv);
+                previous_row = *row;
+                ++emitted_rows;
             }
             else
             {

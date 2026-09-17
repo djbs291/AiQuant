@@ -1,6 +1,6 @@
 # AiQuant
 
-AiQuant is a C++20 engine for quantitative-trading research. It reads tick data from CSV, resamples it into OHLCV candles, computes technical indicators, trains a ridge linear model to predict the next candle's close-to-close delta, and backtests a rule-based signal engine driven by those predictions.
+AiQuant is a C++20 engine for quantitative-trading research. It reads tick data from CSV, resamples it into OHLCV candles, computes technical indicators, trains a linear model — a closed-form ridge fit, or stochastic gradient descent that can go on learning as new candles close — to predict the next candle's close-to-close delta, and backtests a rule-based signal engine driven by those predictions.
 
 The whole pipeline is described by a single INI "scenario" and can be driven three ways: the `aiquant` CLI, the `aiquant_http` microservice, and the `aiquant_api` Python module.
 
@@ -53,6 +53,15 @@ The model's feature set is part of the scenario. `features = close,ema_fast,rsi,
 ```bash
 ./build/aiquant run-mvp scenarios/ticks_mvp.csv --features close,ema_fast,rsi,atr,adx --json | jq .features
 ```
+
+So is the trainer. `model = sgd` swaps the closed-form ridge fit for stochastic gradient descent, and `online_update = true` keeps that model training through the out-of-sample stretch: one update per candle that closes, always one row behind, so nothing is read before it has happened. The run then reports `online_validation_rmse` — the same rows scored predict-then-learn — beside `validation_rmse`, which scores the model as trained:
+
+```bash
+./build/aiquant run-config examples/sgd_online.ini --json \
+  | jq '{model, validation_rmse, online_validation_rmse, online_updates}'
+```
+
+An SGD run is saved and served as a plain linear model, with the standardizer folded into the weights, so `--model-linear` and `/predict` need no changes to consume one.
 
 ## C++ / Python API
 

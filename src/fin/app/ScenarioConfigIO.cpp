@@ -425,6 +425,82 @@ namespace fin::app
                 }
                 cfg.validation_preview_limit = v;
             }
+            else if (lowered == "model")
+            {
+                std::string token = value;
+                std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
+                               { return static_cast<char>(std::tolower(ch)); });
+                if (token == "ridge" || token == "linear")
+                    cfg.model = ModelKind::Ridge;
+                else if (token == "sgd")
+                    cfg.model = ModelKind::Sgd;
+                else
+                {
+                    error = "Unknown model '" + value + "' at line " + std::to_string(line_no) +
+                            " (expected ridge or sgd)";
+                    return false;
+                }
+            }
+            else if (lowered == "sgd_learning_rate" || lowered == "sgd_lr")
+            {
+                double v = 0.0;
+                if (!parse_double_value(value, v))
+                {
+                    error = "Invalid sgd_learning_rate at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.sgd.learning_rate = v;
+            }
+            else if (lowered == "sgd_l2")
+            {
+                double v = 0.0;
+                if (!parse_double_value(value, v))
+                {
+                    error = "Invalid sgd_l2 at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.sgd.l2 = v;
+            }
+            else if (lowered == "sgd_epochs")
+            {
+                std::size_t v = 0;
+                if (!parse_size_value(value, v))
+                {
+                    error = "Invalid sgd_epochs at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.sgd.epochs = v;
+            }
+            else if (lowered == "sgd_power_t")
+            {
+                double v = 0.0;
+                if (!parse_double_value(value, v))
+                {
+                    error = "Invalid sgd_power_t at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.sgd.power_t = v;
+            }
+            else if (lowered == "sgd_standardize")
+            {
+                auto b = parse_bool_value(value);
+                if (!b)
+                {
+                    error = "Invalid boolean for sgd_standardize at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.sgd.standardize = *b;
+            }
+            else if (lowered == "online_update" || lowered == "online")
+            {
+                auto b = parse_bool_value(value);
+                if (!b)
+                {
+                    error = "Invalid boolean for online_update at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.online_update = *b;
+            }
             else
             {
                 // Unknown keys ignored for MVP.

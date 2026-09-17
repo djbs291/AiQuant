@@ -357,6 +357,16 @@ static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin
     else
         os << ", validation RMSE: n/a\n";
 
+    os << "Model: " << result.model;
+    if (result.online_update)
+    {
+        // The frozen RMSE above and this one score the same rows: one with the model as
+        // trained, one with the model as it keeps learning.
+        os << " (online: " << result.online_updates << " updates, prequential RMSE "
+           << result.online_validation_rmse << ")";
+    }
+    os << "\n";
+
     const auto &named = result.training.model.named_weights();
     if (!named.empty())
     {
@@ -386,7 +396,7 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
+        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--model ridge|sgd] [--sgd-lr N] [--sgd-l2 N] [--sgd-epochs N] [--sgd-power-t N] [--no-sgd-standardize] [--online] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
         return 2;
     }
 
@@ -398,6 +408,36 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
         cfg.train_ratio = *ratio;
     if (auto ridge = parse_double_flag(args, "--ridge"))
         cfg.ridge_lambda = *ridge;
+
+    if (auto model = parse_string_flag(args, "--model"))
+    {
+        // Lowercased like the INI value, so --model SGD and --model sgd agree.
+        std::string token = *model;
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
+                       { return static_cast<char>(std::tolower(ch)); });
+        if (token == "sgd")
+            cfg.model = fin::app::ModelKind::Sgd;
+        else if (token == "ridge" || token == "linear")
+            cfg.model = fin::app::ModelKind::Ridge;
+        else
+        {
+            std::cerr << "Unknown --model '" << *model << "' (expected ridge or sgd)\n";
+            return 2;
+        }
+    }
+    if (auto v = parse_double_flag(args, "--sgd-lr"))
+        cfg.sgd.learning_rate = *v;
+    if (auto v = parse_double_flag(args, "--sgd-l2"))
+        cfg.sgd.l2 = *v;
+    if (auto v = parse_size_flag(args, "--sgd-epochs"))
+        cfg.sgd.epochs = *v;
+    if (auto v = parse_double_flag(args, "--sgd-power-t"))
+        cfg.sgd.power_t = *v;
+    if (flag_present(args, "--no-sgd-standardize"))
+        cfg.sgd.standardize = false;
+    // Requires --model sgd; run_scenario refuses the combination rather than ignoring it.
+    if (flag_present(args, "--online"))
+        cfg.online_update = true;
 
     if (auto v = parse_size_flag(args, "--ema-fast"))
         cfg.ema_fast = *v;

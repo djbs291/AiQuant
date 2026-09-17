@@ -44,6 +44,13 @@ key = value  # optional inline comment
 | `stoch_d`, `stoch_d_period` | size_t | `3` | Stochastic %D period. |
 | `zscore`, `zscore_period` | size_t | `20` | Z-Score window. |
 | `momentum`, `momentum_period` | size_t | `10` | Momentum lookback. |
+| `model` | enum | `ridge` | `ridge` (the closed-form solver, and the historical behaviour) or `sgd` (stochastic gradient descent). The value is case-folded; `linear` is an alias for `ridge`. |
+| `sgd_learning_rate`, `sgd_lr` | double | `0.01` | Step size at the first update. Read only when `model = sgd`. |
+| `sgd_l2` | double | `1e-6` | L2 penalty on the weights. The bias is deliberately excluded. |
+| `sgd_epochs` | size_t | `10` | Sequential passes over the training rows. Must be at least 1. |
+| `sgd_power_t` | double | `0.25` | Decay exponent: `eta_t = sgd_learning_rate / (1 + t)^sgd_power_t`. Zero holds the rate constant. |
+| `sgd_standardize` | bool | `true` | Center and scale each column by its running mean and standard deviation before each update. |
+| `online_update`, `online` | bool | `false` | Keep training through the out-of-sample stretch. Requires `model = sgd`. |
 
 ## Feature catalogue
 
@@ -55,6 +62,46 @@ Two things to keep in mind:
 - **`vwap` is session-scoped.** It accumulates from the first candle and only restarts when the bus is reset, so on a long file it drifts toward a whole-file average rather than a daily one.
 
 The order of the list is the column order of the model, and it is recorded in the trained model file.
+
+## Model and online learning
+
+`model` picks the trainer. `ridge` is the closed-form solver the engine has always used, and it
+stays the default: a scenario that does not mention `model` trains exactly the model it did
+before this key existed.
+
+`sgd` fits the same target, `next_close - close`, by stochastic gradient descent. Two things
+follow from that:
+
+- **It can keep learning.** `online_update = true` hands the model every candle that closes
+  past the training split, as one `partial_fit` on the delta that candle has just realized.
+  The update always runs one row behind, because a row's target is only known once the next
+  row closes, so the replay never reads a candle before it has happened. The run then reports
+  two errors over the same rows: `validation_rmse` for the model as trained, and
+  `online_validation_rmse` for the same rows scored predict-then-learn. `online_updates` says
+  how many updates were applied, and it equals `validation_samples` whenever the two agree on
+  which rows are out of sample.
+- **It needs its features on a common scale.** `close` is around 100 while `macd` is around
+  0.01, and one learning rate cannot serve both. `sgd_standardize` (on by default) centers and
+  scales each column by its running mean and standard deviation. With it off, a rate that
+  suits one column overshoots on the other; the model raises an error naming the learning rate
+  rather than producing silent NaNs.
+
+Three caveats worth knowing before trusting a number:
+
+- `model_out` writes the model **as trained**, before any online update. The file is the
+  artifact of the training run, not of the replay that follows it.
+- The standardizer's moments keep moving, so a prediction depends on the moments at the time
+  it was made. The same feature vector can score differently after further updates.
+- An SGD run is persisted and served as a plain linear model: the standardizer is folded back
+  into the weights (`w'_j = w_j / sigma_j`), so the reported weights, the saved file,
+  `aiquant backtest --model-linear` and the HTTP `/predict` endpoint all behave exactly as
+  they do for a ridge run.
+
+`online_update = true` without `model = sgd` is refused rather than ignored: the ridge model
+has no `partial_fit`, and a run that reported online learning without doing any would be worse
+than an error.
+
+See `examples/sgd_online.ini` for a tuned, runnable configuration.
 
 ## Boolean Parsing
 
