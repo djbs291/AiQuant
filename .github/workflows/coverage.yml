@@ -65,6 +65,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build-cov --output-on-failure
 
+      # The server is linked with --coverage but ctest never executes it, so its lines counted
+      # as dead weight. Running the smoke test here covers them.
+      - name: HTTP service smoke test
+        run: AIQUANT_BUILD_DIR=build-cov python3 tests/http/smoke_test.py
+
       - name: Capture coverage
         run: |
           # Drop test object coverage ahead of capture to avoid GCC 13 geninfo

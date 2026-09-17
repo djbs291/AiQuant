@@ -56,6 +56,13 @@ jobs:
       - name: HTTP service smoke test
         run: python3 tests/http/smoke_test.py
 
+      # Keeps the examples honest: they break the build if they stop working.
+      - name: Examples
+        run: |
+          ./build/aiquant run-config examples/wide_features.ini --json > /dev/null
+          PY=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' build/CMakeCache.txt)
+          PYTHONPATH=build "${PY:-python3}" examples/run_scenario.py
+
       - name: Upload test logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -99,6 +106,12 @@ jobs:
 
       - name: HTTP service smoke test
         run: python3 tests/http/smoke_test.py
+
+      - name: Examples
+        run: |
+          ./build/aiquant run-config examples/wide_features.ini --json > /dev/null
+          PY=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' build/CMakeCache.txt)
+          PYTHONPATH=build "${PY:-python3}" examples/run_scenario.py
 
       - name: Upload test logs on failure
         if: failure()
