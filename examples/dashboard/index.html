@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AiQuant</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>AiQuant</h1>
+  <p id="status" class="status">checking service…</p>
+</header>
+
+<main>
+  <!-- One panel per thing the engine can actually do. -->
+  <section class="panel">
+    <h2>Run a scenario</h2>
+    <p class="hint">POST /run-config — the body is the INI itself.</p>
+    <textarea id="scenario-ini" rows="9" spellcheck="false">ticks = ticks_mvp.csv
+tf = M1
+features = close,ema_fast,rsi,atr,adx
+train_ratio = 0.7
+preview = 3</textarea>
+    <button id="run-scenario">Run</button>
+    <div id="scenario-out" class="out"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Predict</h2>
+    <p class="hint">POST /predict — values are reordered into the model's own column order.</p>
+    <label>Model <input id="predict-model" type="text" value="model.csv" spellcheck="false"></label>
+    <div id="feature-rows"></div>
+    <button id="add-feature" class="secondary">Add feature</button>
+    <button id="run-predict">Predict</button>
+    <div id="predict-out" class="out"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Signal</h2>
+    <p class="hint">POST /signal — rules only, or with a prediction. Blank fields are omitted.</p>
+    <div class="grid">
+      <label>close <input id="sig-close" type="number" step="any" value="100"></label>
+      <label>rsi <input id="sig-rsi" type="number" step="any" value="20"></label>
+      <label>ema_fast <input id="sig-ema-fast" type="number" step="any" value="11"></label>
+      <label>ema_slow <input id="sig-ema-slow" type="number" step="any" value="10"></label>
+      <label>prediction <input id="sig-prediction" type="number" step="any" placeholder="optional"></label>
+      <label>rsi_buy <input id="sig-rsi-buy" type="number" step="any" placeholder="30"></label>
+      <label>rsi_sell <input id="sig-rsi-sell" type="number" step="any" placeholder="70"></label>
+      <label class="check"><input id="sig-xover" type="checkbox" checked> use_ema_crossover</label>
+    </div>
+    <button id="run-signal">Evaluate</button>
+    <div id="signal-out" class="out"></div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
