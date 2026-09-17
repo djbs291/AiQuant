@@ -102,6 +102,7 @@ namespace fin::ml
             return false;
 
         std::vector<std::pair<std::string, double>> named;
+        std::vector<std::string> feature_names;
         double bias = 0.0;
         bool bias_set = false;
 
@@ -111,7 +112,27 @@ namespace fin::ml
             std::string_view sv(line);
             sv = trim(sv);
             if (sv.empty() || sv.front() == '#')
+            {
+                // "# features: a,b,c" records the column order the model was trained on.
+                constexpr std::string_view prefix = "# features:";
+                if (sv.size() > prefix.size() && sv.substr(0, prefix.size()) == prefix)
+                {
+                    feature_names.clear();
+                    std::string_view list = trim(sv.substr(prefix.size()));
+                    while (!list.empty())
+                    {
+                        const auto comma = list.find(',');
+                        const auto end = (comma == std::string_view::npos) ? list.size() : comma;
+                        std::string_view item = trim(list.substr(0, end));
+                        if (!item.empty())
+                            feature_names.emplace_back(item);
+                        if (comma == std::string_view::npos)
+                            break;
+                        list.remove_prefix(comma + 1);
+                    }
+                }
                 continue;
+            }
 
             auto delim = sv.find_first_of(",;\t ");
             if (delim == std::string_view::npos)
@@ -141,6 +162,31 @@ namespace fin::ml
             return false;
 
         set_named_weights(std::move(named), bias_set ? bias : 0.0);
+        feature_names_ = std::move(feature_names);
         return ready_;
+    }
+
+    void LinearModel::validate_schema(const FeatureVector &features) const
+    {
+        if (feature_names_.empty())
+            return; // model file predates the schema line; nothing to check against
+
+        const auto join = [](const std::vector<std::string> &names) {
+            std::string out;
+            for (std::size_t i = 0; i < names.size(); ++i)
+            {
+                if (i > 0)
+                    out += ", ";
+                out += names[i];
+            }
+            return out;
+        };
+
+        if (features.names != feature_names_)
+        {
+            throw std::invalid_argument("Feature set mismatch: model was trained on [" +
+                                        join(feature_names_) + "] but the input has [" +
+                                        join(features.names) + "]");
+        }
     }
 }
