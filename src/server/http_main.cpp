@@ -21,7 +21,9 @@
 #include <string_view>
 #include <thread>
 
+#include "fin/api/PredictService.hpp"
 #include "fin/api/ScenarioService.hpp"
+#include "fin/app/Json.hpp"
 #include "fin/app/ScenarioSerialization.hpp"
 
 namespace
@@ -33,6 +35,8 @@ namespace
         std::filesystem::path root = std::filesystem::current_path();
         std::size_t max_body = 1024 * 1024; // 1 MiB
         unsigned max_connections = 32;
+        // Default model for /predict and /signal; a request may name another one under --root.
+        std::string model_path;
     };
 
     constexpr std::size_t kMaxHeaderBytes = 16 * 1024;
@@ -238,10 +242,11 @@ namespace
         Missing
     };
 
-    // Resolves the requested scenario against the configured root and refuses anything that
-    // escapes it, so the service cannot be used to read arbitrary files off the host.
-    PathStatus resolve_scenario_path(const std::filesystem::path &root, const std::string &raw,
-                                     std::filesystem::path &resolved)
+    // Resolves a requested file (a scenario, or a model) against the configured root and
+    // refuses anything that escapes it, so the service cannot be used to read arbitrary files
+    // off the host.
+    PathStatus resolve_under_root(const std::filesystem::path &root, const std::string &raw,
+                                  std::filesystem::path &resolved)
     {
         const auto requested = trim(raw);
         if (requested.empty())
@@ -267,7 +272,245 @@ namespace
         return PathStatus::Ok;
     }
 
-    void handle_request(const fin::api::ScenarioService &service, const Options &opts, int client)
+    // ---- JSON request helpers for /predict and /signal -------------------------------------
+    //
+    // Everything here reports a problem through `error` instead of throwing, so a malformed
+    // body is a 400 with a reason rather than an exception crossing the request boundary.
+
+    bool read_optional_number(const fin::app::json::Value &root, const char *key,
+                              std::optional<double> &out, std::string &error)
+    {
+        const auto *value = root.find(key);
+        if (value == nullptr || value->is_null())
+            return true;
+        if (!value->is_number())
+        {
+            error = std::string(key) + " must be a number";
+            return false;
+        }
+        out = value->as_number();
+        return true;
+    }
+
+    bool read_optional_string(const fin::app::json::Value &root, const char *key,
+                              std::string &out, std::string &error)
+    {
+        const auto *value = root.find(key);
+        if (value == nullptr || value->is_null())
+            return true;
+        if (!value->is_string())
+        {
+            error = std::string(key) + " must be a string";
+            return false;
+        }
+        out = value->as_string();
+        return true;
+    }
+
+    bool read_optional_bool(const fin::app::json::Value &root, const char *key,
+                            bool &out, std::string &error)
+    {
+        const auto *value = root.find(key);
+        if (value == nullptr || value->is_null())
+            return true;
+        if (!value->is_bool())
+        {
+            error = std::string(key) + " must be a boolean";
+            return false;
+        }
+        out = value->as_bool();
+        return true;
+    }
+
+    // "features": {"close": 100.0, "rsi": 55.0}
+    bool read_features(const fin::app::json::Value &root,
+                       std::vector<std::pair<std::string, double>> &out, std::string &error)
+    {
+        const auto *features = root.find("features");
+        if (features == nullptr || features->is_null())
+            return true;
+        if (!features->is_object())
+        {
+            error = "features must be an object of name/number pairs";
+            return false;
+        }
+        for (const auto &[name, value] : features->as_object())
+        {
+            if (!value.is_number())
+            {
+                error = "feature '" + name + "' must be a number";
+                return false;
+            }
+            out.emplace_back(name, value.as_number());
+        }
+        return true;
+    }
+
+    const char *signal_type_to_cstr(fin::signal::SignalType type)
+    {
+        switch (type)
+        {
+        case fin::signal::SignalType::Buy:
+            return "Buy";
+        case fin::signal::SignalType::Sell:
+            return "Sell";
+        case fin::signal::SignalType::Hold:
+        default:
+            return "Hold";
+        }
+    }
+
+    void append_feature_array(std::ostream &out, const std::vector<std::string> &features)
+    {
+        out << '[';
+        for (std::size_t i = 0; i < features.size(); ++i)
+        {
+            if (i > 0)
+                out << ", ";
+            out << std::quoted(features[i]);
+        }
+        out << ']';
+    }
+
+    // Parses the body and resolves the optional "model" path. Returns false after answering.
+    bool prepare_request(int client, const Options &opts, const std::string &body,
+                         fin::app::json::Value &root, fin::api::PredictRequest &predict)
+    {
+        if (body.empty())
+        {
+            send_response(client, 400, "Bad Request", json_error("Empty request body"));
+            return false;
+        }
+
+        std::string error;
+        auto parsed = fin::app::json::parse(body, error);
+        if (!parsed)
+        {
+            send_response(client, 400, "Bad Request", json_error("Invalid JSON: " + error));
+            return false;
+        }
+        if (!parsed->is_object())
+        {
+            send_response(client, 400, "Bad Request", json_error("Body must be a JSON object"));
+            return false;
+        }
+        root = std::move(*parsed);
+
+        std::string model;
+        if (!read_optional_string(root, "model", model, error))
+        {
+            send_response(client, 400, "Bad Request", json_error(error));
+            return false;
+        }
+        if (!model.empty())
+        {
+            std::filesystem::path resolved;
+            switch (resolve_under_root(opts.root, model, resolved))
+            {
+            case PathStatus::Empty:
+                send_response(client, 400, "Bad Request", json_error("Empty model path"));
+                return false;
+            case PathStatus::Outside:
+                send_response(client, 403, "Forbidden",
+                              json_error("Model path is outside the configured root directory"));
+                return false;
+            case PathStatus::Missing:
+                send_response(client, 404, "Not Found", json_error("Model file not found"));
+                return false;
+            case PathStatus::Ok:
+                break;
+            }
+            predict.model_path = resolved.string();
+        }
+
+        if (!read_features(root, predict.features, error))
+        {
+            send_response(client, 400, "Bad Request", json_error(error));
+            return false;
+        }
+        return true;
+    }
+
+    void handle_predict(int client, const Options &opts, const fin::api::PredictService &predictor,
+                        const std::string &body)
+    {
+        fin::app::json::Value root;
+        fin::api::PredictRequest request;
+        if (!prepare_request(client, opts, body, root, request))
+            return;
+
+        const auto response = predictor.predict(request); // invalid_argument -> 400 upstream
+
+        std::ostringstream out;
+        out << "{\n  \"prediction\": " << response.prediction << ",\n  \"features\": ";
+        append_feature_array(out, response.features);
+        out << ",\n  \"model\": " << std::quoted(response.model_path) << "\n}\n";
+        send_response(client, 200, "OK", out.str());
+    }
+
+    void handle_signal(int client, const Options &opts, const fin::api::PredictService &predictor,
+                       const std::string &body)
+    {
+        fin::app::json::Value root;
+        fin::api::SignalRequest request;
+        if (!prepare_request(client, opts, body, root, request.predict))
+            return;
+
+        std::string error;
+        std::optional<double> close;
+        std::optional<double> ts_ms;
+        if (!read_optional_number(root, "close", close, error) ||
+            !read_optional_number(root, "rsi", request.rsi, error) ||
+            !read_optional_number(root, "ema_fast", request.ema_fast, error) ||
+            !read_optional_number(root, "ema_slow", request.ema_slow, error) ||
+            !read_optional_number(root, "prediction", request.prediction, error) ||
+            !read_optional_number(root, "ts_ms", ts_ms, error))
+        {
+            send_response(client, 400, "Bad Request", json_error(error));
+            return;
+        }
+
+        std::optional<double> rsi_buy;
+        std::optional<double> rsi_sell;
+        if (!read_optional_number(root, "rsi_buy", rsi_buy, error) ||
+            !read_optional_number(root, "rsi_sell", rsi_sell, error) ||
+            !read_optional_string(root, "symbol", request.symbol, error) ||
+            !read_optional_bool(root, "use_ema_crossover", request.engine.use_ema_crossover, error))
+        {
+            send_response(client, 400, "Bad Request", json_error(error));
+            return;
+        }
+
+        if (close)
+            request.close = *close;
+        if (ts_ms)
+            request.ts_ms = static_cast<long long>(*ts_ms);
+        if (rsi_buy)
+            request.engine.rsi_buy_below = *rsi_buy;
+        if (rsi_sell)
+            request.engine.rsi_sell_above = *rsi_sell;
+
+        const auto response = predictor.signal(request);
+
+        std::ostringstream out;
+        out << "{\n  \"signal\": \"" << signal_type_to_cstr(response.signal.type) << "\",\n"
+            << "  \"score\": " << response.signal.score << ",\n"
+            << "  \"reason\": " << std::quoted(response.signal.source) << ",\n"
+            << "  \"symbol\": " << std::quoted(response.signal.symbol) << ",\n"
+            << "  \"prediction\": ";
+        if (response.prediction)
+            out << *response.prediction;
+        else
+            out << "null";
+        out << ",\n  \"features\": ";
+        append_feature_array(out, response.features);
+        out << "\n}\n";
+        send_response(client, 200, "OK", out.str());
+    }
+
+    void handle_request(const fin::api::ScenarioService &service,
+                        const fin::api::PredictService &predictor,
+                        const Options &opts, int client)
     {
         SocketGuard guard(client);
 
@@ -305,7 +548,7 @@ namespace
             if (req.path == "/run-file")
             {
                 std::filesystem::path scenario;
-                switch (resolve_scenario_path(opts.root, req.body, scenario))
+                switch (resolve_under_root(opts.root, req.body, scenario))
                 {
                 case PathStatus::Empty:
                     send_response(client, 400, "Bad Request", json_error("Missing scenario path"));
@@ -358,6 +601,14 @@ namespace
                 const auto result = service.run(cfg);
                 send_response(client, 200, "OK", fin::app::scenario_result_to_json(cfg, result));
             }
+            else if (req.path == "/predict")
+            {
+                handle_predict(client, opts, predictor, req.body);
+            }
+            else if (req.path == "/signal")
+            {
+                handle_signal(client, opts, predictor, req.body);
+            }
             else
             {
                 send_response(client, 404, "Not Found", json_error("Unknown endpoint"));
@@ -381,8 +632,10 @@ namespace
 
     void print_usage()
     {
-        std::cerr << "Usage: aiquant_http [--port N] [--root DIR] [--max-body BYTES] [--max-connections N]\n"
-                  << "  --root             directory /run-file may read scenarios from (default: cwd)\n"
+        std::cerr << "Usage: aiquant_http [--port N] [--root DIR] [--model FILE] [--max-body BYTES]"
+                     " [--max-connections N]\n"
+                  << "  --root             directory /run-file and model paths resolve under (default: cwd)\n"
+                  << "  --model            default model for /predict and /signal\n"
                   << "  --max-body         maximum request body in bytes (default: 1048576)\n"
                   << "  --max-connections  requests served concurrently before 503 (default: 32)\n";
     }
@@ -408,6 +661,8 @@ namespace
                     opts.port = std::stoi(value);
                 else if (arg == "--root")
                     opts.root = value;
+                else if (arg == "--model")
+                    opts.model_path = value;
                 else if (arg == "--max-body")
                     opts.max_body = static_cast<std::size_t>(std::stoull(value));
                 else if (arg == "--max-connections")
@@ -488,6 +743,8 @@ int main(int argc, char **argv)
               << opts.max_connections << std::endl;
 
     const fin::api::ScenarioService service;
+    // Stateless: it loads the model per request, so concurrent requests share it safely.
+    const fin::api::PredictService predictor(opts.model_path);
     std::atomic<unsigned> active{0};
 
     while (true)
@@ -511,8 +768,8 @@ int main(int argc, char **argv)
         ++active;
         // ScenarioService is stateless and run_scenario only touches its arguments, so requests
         // can be served concurrently. The thread owns the socket and closes it.
-        std::thread([client, &service, &opts, &active] {
-            handle_request(service, opts, client); // owns and closes the socket
+        std::thread([client, &service, &predictor, &opts, &active] {
+            handle_request(service, predictor, opts, client); // owns and closes the socket
             --active;
         }).detach();
     }

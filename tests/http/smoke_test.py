@@ -93,6 +93,15 @@ def main():
         with open(outside, "w") as f:
             f.write(f"ticks = {ticks}\n")
 
+        # bias 0.5, close 0.1, rsi -0.02  ->  0.5 + 0.1*100 - 0.02*50 = 9.5
+        model = os.path.join(root, "model.csv")
+        with open(model, "w") as f:
+            f.write("# AiQuant LinearModel weights\n# features: close,rsi\n"
+                    "bias,0.5\nclose,0.1\nrsi,-0.02\n")
+        outside_model = os.path.join(tmp, "outside_model.csv")
+        with open(outside_model, "w") as f:
+            f.write("bias,0.0\nclose,1.0\n")
+
         port = free_port()
         proc = subprocess.Popen(
             [SERVER, "--port", str(port), "--root", root, "--max-body", str(MAX_BODY)],
@@ -152,6 +161,64 @@ def main():
 
             status, body = request(port, "POST", "/run-config", "x" * (MAX_BODY + 1))
             check("POST /run-config (body over the limit)", status, 413)
+
+            # /predict: the model is named per request and resolved under --root.
+            status, body = request(port, "POST", "/predict",
+                                   json.dumps({"model": "model.csv",
+                                               "features": {"close": 100.0, "rsi": 50.0}}))
+            check("POST /predict", status, 200)
+            payload = json.loads(body)
+            assert abs(payload["prediction"] - 9.5) < 1e-9, payload
+            assert payload["features"] == ["close", "rsi"], payload
+
+            status, body = request(port, "POST", "/predict",
+                                   json.dumps({"model": "model.csv", "features": {"close": 100.0}}))
+            check("POST /predict (missing feature)", status, 400)
+            assert "rsi" in body, body
+
+            status, body = request(port, "POST", "/predict",
+                                   json.dumps({"model": "../outside_model.csv",
+                                               "features": {"close": 100.0}}))
+            check("POST /predict (model escapes root)", status, 403)
+
+            status, body = request(port, "POST", "/predict",
+                                   json.dumps({"model": "nope.csv", "features": {"close": 1.0}}))
+            check("POST /predict (missing model)", status, 404)
+
+            status, body = request(port, "POST", "/predict", "{not json")
+            check("POST /predict (invalid JSON)", status, 400)
+
+            status, body = request(port, "POST", "/predict",
+                                   json.dumps({"features": {"close": 1.0}}))
+            check("POST /predict (no model configured)", status, 400)
+
+            status, body = request(port, "GET", "/predict")
+            check("GET /predict", status, 405)
+
+            # /signal: rules only, with a caller-supplied prediction.
+            status, body = request(port, "POST", "/signal",
+                                   json.dumps({"close": 100.0, "rsi": 20.0, "ema_fast": 11.0,
+                                               "ema_slow": 10.0, "prediction": 0.5}))
+            check("POST /signal (explicit prediction)", status, 200)
+            payload = json.loads(body)
+            assert payload["signal"] == "Buy", payload
+            assert abs(payload["score"] - 2.5) < 1e-9, payload
+
+            # /signal: the model supplies the prediction.
+            status, body = request(port, "POST", "/signal",
+                                   json.dumps({"model": "model.csv", "close": 100.0, "rsi": 50.0,
+                                               "features": {"close": 100.0, "rsi": 50.0}}))
+            check("POST /signal (model prediction)", status, 200)
+            payload = json.loads(body)
+            assert abs(payload["prediction"] - 9.5) < 1e-9, payload
+            assert payload["features"] == ["close", "rsi"], payload
+
+            # /signal with no model and no prediction still evaluates the rules.
+            status, body = request(port, "POST", "/signal", json.dumps({"close": 100.0, "rsi": 80.0}))
+            check("POST /signal (rules only)", status, 200)
+            payload = json.loads(body)
+            assert payload["signal"] == "Sell", payload
+            assert payload["prediction"] is None, payload
 
             # Each connection is served on its own thread; run a batch at once.
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
