@@ -76,6 +76,16 @@ target_include_directories(fin_ml PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(fin_ml PUBLIC cxx_std_20)
 target_link_libraries(fin_ml PUBLIC fin_core fin_indicators)
 
+# ============ Streaming Library ============
+# Not part of fin_app: fin_app links fin_backtest, and the live path must never depend on the
+# backtester. Not part of fin_io either, which is core-only and must not acquire indicators,
+# ml or signal.
+file(GLOB_RECURSE STREAM_SRC "src/fin/stream/*.cpp")
+add_library(fin_stream STATIC ${STREAM_SRC})
+target_include_directories(fin_stream PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(fin_stream PUBLIC cxx_std_20)
+target_link_libraries(fin_stream PUBLIC fin_io fin_indicators fin_ml fin_signal fin_core)
+
 # ============ Application Library ============
 file(GLOB_RECURSE APP_SRC "src/fin/app/*.cpp")
 add_library(fin_app STATIC ${APP_SRC})
@@ -93,7 +103,8 @@ target_link_libraries(fin_api PUBLIC fin_app)
 # ============ Main Executable ============
 add_executable(aiquant src/main.cpp)
 # fin_api pulls in fin_app and, transitively, every other library (all PUBLIC deps).
-target_link_libraries(aiquant PRIVATE fin_api)
+# fin_stream is not in that tree — nothing in fin_app uses it — so it is named explicitly.
+target_link_libraries(aiquant PRIVATE fin_api fin_stream)
 target_compile_features(aiquant PRIVATE cxx_std_20)
 
 add_executable(aiquant_http src/server/http_main.cpp)
@@ -179,10 +190,10 @@ if(AIQUANT_HAVE_CATCH AND TEST_SOURCES)
     target_compile_definitions(aiquant_tests PRIVATE AIQUANT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
     if(TARGET Catch2::Catch2WithMain)
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_api)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2WithMain fin_api fin_stream)
         message(STATUS "Using Catch2 v3")
     else()
-        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_api)
+        target_link_libraries(aiquant_tests PRIVATE Catch2::Catch2 fin_api fin_stream)
         message(STATUS "Using the bundled minicatch or Catch2 v2")
     endif()
 
