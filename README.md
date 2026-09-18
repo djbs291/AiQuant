@@ -33,7 +33,7 @@ Golden tests compare the indicators against [TA-Lib](https://ta-lib.org/) and ar
 
 ## CLI
 
-Subcommands: `features`, `backtest`, `train-linear`, `run-mvp`, `run-config`. Run `./build/aiquant` without arguments for usage.
+Subcommands: `features`, `backtest`, `train-linear`, `run-mvp`, `run-config`, `stream`. Run `./build/aiquant` without arguments for usage.
 
 ```bash
 ./build/aiquant run-config scenarios/mvp.ini            # ready-to-run example scenario
@@ -62,6 +62,29 @@ So is the trainer. `model = sgd` swaps the closed-form ridge fit for stochastic 
 ```
 
 An SGD run is saved and served as a plain linear model, with the standardizer folded into the weights, so `--model-linear` and `/predict` need no changes to consume one.
+
+## Streaming
+
+`run-config` is a batch: it resamples a whole file into memory, trains, then replays. `stream` is
+the same pipeline driven one tick at a time — ticks → candles → indicators → model → signals —
+so it can be fed by a live source instead of a file. Signals come out as they happen:
+
+```bash
+./build/aiquant run-mvp scenarios/ticks_mvp.csv --model-out model.csv    # train once
+./build/aiquant stream scenarios/ticks_mvp.csv --tf M1 --model-linear model.csv
+```
+
+One CSV row per signal on stdout (so it pipes), the summary on stderr. `--all` includes `Hold`
+bars, `--limit N` stops printing after N rows. Without `--features` the set recorded in the
+model file is used, so a model is never applied to a feature set it was not trained on.
+
+A stream carries **one symbol**. A file holding a second one is refused, naming both, rather
+than blended into a single candle series — which is what the batch path still does silently.
+`--symbol ABC` says "this file has several, take mine and count the rest as skipped".
+
+Threads, queues and SIMD are not here yet: this is the single-threaded skeleton the rest of the
+streaming roadmap builds on. `StreamEngine` does the routing, `SymbolPipeline` holds one
+symbol's state and stages, and `ISignalSink` is where a queue will slot in.
 
 ## C++ / Python API
 

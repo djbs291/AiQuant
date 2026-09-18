@@ -10,9 +10,11 @@ The **IO Layer** is the data ingestion pipeline of the engine. It provides unifi
 
 - Abstract interface to unify historical and live data feeds.
 - Examples:
-  - `FileTickSource` (CSV reader → yields `Tick`)
-  - `MockTickSource` (synthetic data for tests)
-  - `StreamTickSource` (WebSocket/UDP, optional future)
+  - `FileTickSource` (CSV reader → yields `Tick`) — **implemented**
+  - `MockTickSource` (replays a fixed vector of ticks; `rewind()` for A/B runs) — **implemented**, `include/fin/io/MockTickSource.hpp`
+  - `StreamTickSource` (WebSocket/UDP, optional future) — still future
+
+> The interface below is in the repo as `ISource<T>`, a template, with `using ITickSource = ISource<fin::core::Tick>` as the name this document uses. `fin::stream::StreamEngine` consumes that alias, so a live feed only has to implement `next()`.
 
 ```cpp
 class ITickSource {
