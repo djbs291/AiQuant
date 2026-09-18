@@ -24,6 +24,7 @@
 #include "fin/app/ScenarioConfigIO.hpp"
 #include "fin/app/ScenarioUtils.hpp"
 #include "fin/app/ScenarioSerialization.hpp"
+#include "fin/stream/StreamEngine.hpp"
 
 using namespace fin;
 
@@ -100,6 +101,42 @@ static fin::io::Timeframe parse_timeframe_flag(const std::vector<std::string> &a
         }
     }
     return fin::io::Timeframe::M1;
+}
+
+// Comma-separated feature set, e.g. --features close,ema_fast,rsi,atr. Empty when the flag is
+// absent, which every caller reads as "the historical six". Unknown names are rejected by the
+// FeatureBus, which reports them through the caller's catch.
+static std::vector<std::string> parse_feature_list(const std::vector<std::string> &args)
+{
+    std::vector<std::string> features;
+
+    auto flag = parse_string_flag(args, "--features");
+    if (!flag)
+        return features;
+
+    const std::string &list = *flag;
+    std::size_t start = 0;
+    while (start <= list.size())
+    {
+        const std::size_t comma = list.find(',', start);
+        const std::size_t end = (comma == std::string::npos) ? list.size() : comma;
+        std::string name = list.substr(start, end - start);
+        const auto first = name.find_first_not_of(" \t");
+        const auto last = name.find_last_not_of(" \t");
+        if (first != std::string::npos)
+        {
+            name = name.substr(first, last - first + 1);
+            // Lowercase to match the INI parser, so --features RSI and rsi behave alike.
+            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch)
+                           { return static_cast<char>(std::tolower(ch)); });
+            features.push_back(std::move(name));
+        }
+        if (comma == std::string::npos)
+            break;
+        start = comma + 1;
+    }
+
+    return features;
 }
 
 static int cmd_backtest(const std::vector<std::string> &args)
@@ -473,32 +510,7 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
     if (auto v = parse_double_flag(args, "--fee"))
         cfg.fee_per_trade = *v;
 
-    if (auto features = parse_string_flag(args, "--features"))
-    {
-        // Comma-separated, e.g. --features close,ema_fast,rsi,atr. Unknown names are rejected
-        // by the FeatureBus, which reports them through the catch below.
-        const std::string &list = *features;
-        std::size_t start = 0;
-        while (start <= list.size())
-        {
-            const std::size_t comma = list.find(',', start);
-            const std::size_t end = (comma == std::string::npos) ? list.size() : comma;
-            std::string name = list.substr(start, end - start);
-            const auto first = name.find_first_not_of(" \t");
-            const auto last = name.find_last_not_of(" \t");
-            if (first != std::string::npos)
-            {
-                name = name.substr(first, last - first + 1);
-                // Lowercase to match the INI parser, so --features RSI and rsi behave alike.
-                std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch)
-                               { return static_cast<char>(std::tolower(ch)); });
-                cfg.features.push_back(std::move(name));
-            }
-            if (comma == std::string::npos)
-                break;
-            start = comma + 1;
-        }
-    }
+    cfg.features = parse_feature_list(args);
 
     if (auto out = parse_string_flag(args, "--model-out"))
         cfg.model_output_path = *out;
@@ -559,6 +571,150 @@ static int cmd_run_config(const std::vector<std::string> &args)
     }
 }
 
+// Prints one CSV row per signal as the stream produces it. stdout stays pure data, as in
+// `features`, so a live stream pipes; the summary goes to stderr.
+class CsvSignalSink final : public fin::stream::ISignalSink
+{
+public:
+    CsvSignalSink(bool print_holds, std::size_t limit)
+        : print_holds_(print_holds), limit_(limit) {}
+
+    void on_signal(const fin::stream::StreamEvent &event) override
+    {
+        if (!print_holds_ && event.signal.type == fin::signal::SignalType::Hold)
+            return;
+        if (limit_ > 0 && printed_ >= limit_)
+            return;
+
+        using namespace std::chrono;
+        const long long ts_ms =
+            duration_cast<milliseconds>(event.candle.start_time().time_since_epoch()).count();
+
+        std::cout << ts_ms << ',' << event.symbol << ',' << signal_to_cstr(event.signal.type)
+                  << ',' << event.signal.score << ',' << event.candle.close().value() << ',';
+        if (event.prediction)
+            std::cout << *event.prediction; // empty during warmup
+        std::cout << ',' << (event.partial ? 1 : 0) << ',' << event.signal.source << "\n";
+        ++printed_;
+    }
+
+    [[nodiscard]] std::size_t printed() const noexcept { return printed_; }
+
+private:
+    static const char *signal_to_cstr(fin::signal::SignalType type)
+    {
+        switch (type)
+        {
+        case fin::signal::SignalType::Buy:
+            return "Buy";
+        case fin::signal::SignalType::Sell:
+            return "Sell";
+        case fin::signal::SignalType::Hold:
+        default:
+            return "Hold";
+        }
+    }
+
+    bool print_holds_ = false;
+    std::size_t limit_ = 0;
+    std::size_t printed_ = 0;
+};
+
+static int cmd_stream(const std::vector<std::string> &args)
+{
+    if (args.empty())
+    {
+        std::cerr << "Usage: aiquant stream <ticks.csv> [--tf S1|S5|M1|M5|H1] [--model-linear path] [--features a,b,c] [--symbol SYM] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--all] [--limit N]\n";
+        return 2;
+    }
+
+    const std::string path = args[0];
+
+    fin::stream::StreamConfig cfg{};
+    cfg.timeframe = parse_timeframe_flag(args);
+
+    if (auto v = parse_size_flag(args, "--ema-fast"))
+        cfg.params.ema_fast = *v;
+    if (auto v = parse_size_flag(args, "--ema-slow"))
+        cfg.params.ema_slow = *v;
+    if (auto v = parse_size_flag(args, "--rsi"))
+        cfg.params.rsi = *v;
+    if (auto v = parse_size_flag(args, "--macd-fast"))
+        cfg.params.macd_fast = *v;
+    if (auto v = parse_size_flag(args, "--macd-slow"))
+        cfg.params.macd_slow = *v;
+    if (auto v = parse_size_flag(args, "--macd-signal"))
+        cfg.params.macd_signal = *v;
+
+    if (auto v = parse_double_flag(args, "--rsi-buy"))
+        cfg.signal.rsi_buy_below = *v;
+    if (auto v = parse_double_flag(args, "--rsi-sell"))
+        cfg.signal.rsi_sell_above = *v;
+    cfg.signal.use_ema_crossover = !flag_present(args, "--no-ema-xover");
+
+    if (auto symbol = parse_string_flag(args, "--symbol"))
+    {
+        // Naming a symbol is how you say "this file holds several; take mine and skip the
+        // rest". Without it, a second symbol is an error rather than a silent blend.
+        cfg.symbol = *symbol;
+        cfg.foreign_symbol = fin::stream::SymbolPolicy::Skip;
+    }
+
+    cfg.features = parse_feature_list(args);
+
+    std::shared_ptr<fin::ml::IModel> model;
+    if (auto model_path = parse_string_flag(args, "--model-linear"))
+    {
+        auto loaded = std::make_shared<fin::ml::LinearModel>();
+        if (!loaded->load_from_file(*model_path))
+        {
+            std::cerr << "Failed to load linear model: " << *model_path << "\n";
+            return 1;
+        }
+        // Without an explicit --features, take the set the model file recorded. Feeding a
+        // model a feature set it was not trained on is the mistake this closes.
+        if (cfg.features.empty() && !loaded->feature_names().empty())
+            cfg.features = loaded->feature_names();
+        model = std::move(loaded);
+    }
+
+    CsvSignalSink sink(flag_present(args, "--all"), parse_size_flag(args, "--limit").value_or(0));
+    fin::stream::StreamEngine engine(cfg, model, &sink);
+
+    fin::io::TickCsvOptions opt{};
+    fin::io::FileTickSource source(path, opt);
+
+    std::cout << "Timestamp,symbol,signal,score,close,prediction,partial,reason\n";
+
+    fin::stream::StreamStats stats{};
+    try
+    {
+        stats = engine.run(source);
+    }
+    catch (const std::exception &ex)
+    {
+        std::cerr << "stream failed: " << ex.what() << "\n";
+        return 1;
+    }
+
+    const auto &read = source.stats();
+    std::cerr << "=== stream ===\n";
+    // Deliberately not ReadStats::rows: it counts the header line too, so reporting it beside
+    // "skipped 0" would imply a tick went missing when none did.
+    std::cerr << "Ticks: " << read.parsed << " parsed, " << read.skipped << " unparsable, "
+              << stats.ticks_out_of_order << " out of order, "
+              << stats.ticks_other_symbol << " other symbol\n";
+    std::cerr << "Symbol: " << engine.bound_symbol() << "\n";
+    std::cerr << "Candles: " << stats.candles << ", feature rows: " << stats.feature_rows
+              << ", predictions: " << stats.predictions;
+    if (stats.prediction_errors > 0)
+        std::cerr << " (" << stats.prediction_errors << " failed)";
+    std::cerr << "\n";
+    std::cerr << "Signals: " << stats.signals << " (Buy " << stats.buys << ", Sell " << stats.sells
+              << ", Hold " << stats.holds << ") - printed " << sink.printed() << "\n";
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     std::vector<std::string> args(argv + 1, argv + argc);
@@ -572,6 +728,7 @@ int main(int argc, char **argv)
         std::cout << "  train-linear <ticks.csv> [--tf ...] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--out path]\n";
         std::cout << "  run-mvp <ticks.csv> [end-to-end training + signal backtest]\n";
         std::cout << "  run-config <scenario.ini> [execute configuration-driven scenario]\n";
+        std::cout << "  stream <ticks.csv> [live pipeline: ticks -> candles -> model -> signals]\n";
 
         return 0;
     }
@@ -596,6 +753,10 @@ int main(int argc, char **argv)
     if (cmd == "run-config")
     {
         return cmd_run_config({args.begin() + 1, args.end()});
+    }
+    if (cmd == "stream")
+    {
+        return cmd_stream({args.begin() + 1, args.end()});
     }
 
     std::cerr << "Unknown command: " << cmd << "\n";
