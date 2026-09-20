@@ -16,6 +16,7 @@ key = value  # optional inline comment
 | Key aliases | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `ticks`, `ticks_path`, `data` | string | **required** | CSV with raw ticks. Relative paths are resolved from the working directory. |
+| `symbol` | string | the first tick's symbol | Which instrument to take out of the file. Ticks for any other symbol are skipped and counted, never merged into the same bar. Case-sensitive, unlike the keys. See below. |
 | `tf`, `timeframe` | enum | `M1` | One of `S1`, `S5`, `M1`, `M5`, `H1`. |
 | `train_ratio` | double | `0.7` | Clamped to `[0.1, 0.95]`. |
 | `ridge`, `ridge_lambda` | double | `1e-6` | Ridge regularization term for linear model. |
@@ -62,6 +63,25 @@ Two things to keep in mind:
 - **`vwap` is session-scoped.** It accumulates from the first candle and only restarts when the bus is reset, so on a long file it drifts toward a whole-file average rather than a daily one.
 
 The order of the list is the column order of the model, and it is recorded in the trained model file.
+
+## Symbols
+
+A scenario produces candles for **one** instrument. A resampler aggregates one series by
+construction, so the tick file is filtered before it reaches one:
+
+- Omit `symbol` and the run binds to the first tick in the file. A single-symbol file — which
+  is what every scenario here uses — therefore needs no key at all, and behaves as it always
+  did.
+- Name a `symbol` and it is selected out of a file that holds several. Ticks belonging to
+  anything else are skipped and counted, and the count comes back as `ticks_other_symbol` in
+  the JSON alongside the resolved `symbol`.
+
+This used to be silent, and wrong: the symbol was parsed off each tick and then dropped, so a
+file holding `ABC` around 100 and `XYZ` around 900 produced bars that opened on one instrument
+and closed on the other, with a high and a low that straddled both. Nothing said so.
+
+Naming a symbol that the file does not contain yields no candles rather than the wrong ones,
+which then fails the usual way — not enough data to get through indicator warmup.
 
 ## Model and online learning
 
