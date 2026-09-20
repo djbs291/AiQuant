@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstddef>
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <utility> // std::pair, for the range-check table at the end of the load
 
 #include "fin/app/ScenarioUtils.hpp"
 #include "fin/indicators/FeatureSpec.hpp" // find_feature: reject unknown feature names
@@ -503,13 +505,60 @@ namespace fin::app
             }
             else
             {
-                // Unknown keys ignored for MVP.
+                // Silence used to be the policy here, which meant a typo trained a different
+                // model than the one asked for and said nothing: `rsi_peroid = 20` left the
+                // period at its default of 14 and the run looked entirely normal.
+                error = "Unknown key '" + key + "' at line " + std::to_string(line_no);
+                return false;
             }
         }
 
         if (cfg.ticks_path.empty())
         {
             error = "Scenario file missing 'ticks' path";
+            return false;
+        }
+
+        // Range checks in one pass rather than at each parse site. A period of zero does not
+        // fail loudly: the indicator simply never becomes ready, and the run dies much later
+        // with "Insufficient data after indicator warmup", which blames the data for what is
+        // a configuration mistake.
+        const std::pair<const char *, std::size_t> periods[] = {
+            {"ema_fast", cfg.ema_fast},
+            {"ema_slow", cfg.ema_slow},
+            {"rsi", cfg.rsi_period},
+            {"macd_fast", cfg.macd_fast},
+            {"macd_slow", cfg.macd_slow},
+            {"macd_signal", cfg.macd_signal},
+            {"sma", cfg.sma_period},
+            {"bb_period", cfg.bb_period},
+            {"atr", cfg.atr_period},
+            {"adx", cfg.adx_period},
+            {"stoch_k", cfg.stoch_k_period},
+            {"stoch_d", cfg.stoch_d_period},
+            {"zscore", cfg.zscore_period},
+            {"momentum", cfg.momentum_period},
+        };
+        for (const auto &[name, value] : periods)
+        {
+            if (value == 0)
+            {
+                error = std::string("Invalid ") + name + ": a period must be >= 1";
+                return false;
+            }
+        }
+
+        if (cfg.bb_k <= 0.0)
+        {
+            error = "Invalid bb_k: the band width must be > 0";
+            return false;
+        }
+
+        // A negative ridge term is not regularization, it is anti-regularization: it quietly
+        // made the fitted model about thirty times worse on the sample scenario.
+        if (cfg.ridge_lambda < 0.0)
+        {
+            error = "Invalid ridge: the regularization term must be >= 0";
             return false;
         }
 
