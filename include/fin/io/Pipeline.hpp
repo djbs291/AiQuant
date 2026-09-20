@@ -12,7 +12,8 @@ namespace fin::io
     struct PipelineResult
     {
         std::vector<fin::core::Candle> candles;
-        ReadStats stats; // rows/parsed/skipped from the source
+        ReadStats stats;   // rows/parsed/skipped from the source
+        std::string error; // non-empty when the file itself was unusable; see FileTickSource::error()
     };
 
     // Reads ticks from CSV and returns M1 candles (UTC, no gap fill)
@@ -33,6 +34,7 @@ namespace fin::io
             r.candles.push_back(*c);
 
         r.stats = src.stats();
+        r.error = src.error();
         return r;
     }
 
@@ -53,8 +55,9 @@ namespace fin::io
         }
         if (auto c = res.flush())
             r.candles.push_back(*c);
-        
+
         r.stats = src.stats();
+        r.error = src.error();
         return r;
     }
 
