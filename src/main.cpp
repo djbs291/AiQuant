@@ -381,6 +381,13 @@ static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin
 {
     os << "=== MVP scenario ===\n";
     os << "Ticks: " << cfg.ticks_path << "\n";
+    if (!result.symbol.empty())
+    {
+        os << "Symbol: " << result.symbol;
+        if (result.ticks_other_symbol > 0)
+            os << " (" << result.ticks_other_symbol << " ticks for other symbols skipped)";
+        os << "\n";
+    }
     os << "Timeframe: " << timeframe_to_cstr(cfg.timeframe) << "\n";
     os << "Candles (post-resample): " << result.candles;
     if (result.warmup_candles > 0)
@@ -433,13 +440,17 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--model ridge|sgd] [--sgd-lr N] [--sgd-l2 N] [--sgd-epochs N] [--sgd-power-t N] [--no-sgd-standardize] [--online] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
+        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--symbol SYM] [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--model ridge|sgd] [--sgd-lr N] [--sgd-l2 N] [--sgd-epochs N] [--sgd-power-t N] [--no-sgd-standardize] [--online] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
         return 2;
     }
 
     fin::app::ScenarioConfig cfg{};
     cfg.ticks_path = args[0];
     cfg.timeframe = parse_timeframe_flag(args);
+
+    // Empty binds to the first tick's symbol, so a single-symbol file needs nothing here.
+    if (auto symbol = parse_string_flag(args, "--symbol"))
+        cfg.symbol = *symbol;
 
     if (auto ratio = parse_double_flag(args, "--train-ratio"))
         cfg.train_ratio = *ratio;

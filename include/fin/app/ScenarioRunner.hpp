@@ -22,6 +22,10 @@ namespace fin::app
     struct ScenarioConfig
     {
         std::string ticks_path;
+        // Which instrument to take out of the tick file. Empty binds to the first tick's
+        // symbol, so a single-symbol file needs no key; naming one selects it out of a file
+        // that holds several, instead of blending them into one candle series.
+        std::string symbol;
         fin::io::Timeframe timeframe = fin::io::Timeframe::M1;
         double train_ratio = 0.7;
         double ridge_lambda = 1e-6;
@@ -79,6 +83,11 @@ namespace fin::app
         std::size_t candles = 0;
         std::size_t warmup_candles = 0;
         std::size_t feature_rows = 0;
+
+        // The symbol the run actually resolved to, and how many ticks belonged to some other
+        // instrument and were left out. Both are reported in the JSON.
+        std::string symbol;
+        std::size_t ticks_other_symbol = 0;
         // The feature set actually used, resolved from the config (reported in the JSON).
         std::vector<std::string> features;
 
