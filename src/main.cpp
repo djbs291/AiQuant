@@ -697,6 +697,14 @@ static int cmd_stream(const std::vector<std::string> &args)
         return 1;
     }
 
+    // The header is parsed on the first next(), so a missing column is only known once the
+    // run is over. Without this the stream would report a tidy zero of everything.
+    if (!source.error().empty())
+    {
+        std::cerr << "stream failed: " << source.error() << "\n";
+        return 1;
+    }
+
     const auto &read = source.stats();
     std::cerr << "=== stream ===\n";
     // Deliberately not ReadStats::rows: it counts the header line too, so reporting it beside
