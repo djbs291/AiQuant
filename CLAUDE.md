@@ -67,6 +67,7 @@ A scenario needs enough candles to get through indicator warmup (about 33 with d
 - Always include `"catch2_compat.hpp"`, which picks the framework and bridges `Catch::Approx` so unqualified `Approx(...)` keeps compiling. Note minicatch's `Approx` is an absolute 1e-12 while Catch2's default epsilon is relative (~1.2e-5), so the same assertion is stricter under the fallback.
 - Tests that need a file on disk use `tests/TestTempFiles.hpp` (`test_files::TempFile`), which writes to the system temp dir and deletes the file on scope exit. Keep new tests on that helper: writing into the current working directory pollutes the repo when `aiquant_tests` is run from the root.
 - Sources and tests are collected with `file(GLOB_RECURSE)`, so re-run the CMake configure step after adding or removing `.cpp` files. Any new `tests/**/*.cpp` is compiled into the single `aiquant_tests` binary.
+- **A randomized test is also a fuzz run.** `sanitizers.yml` runs ASan/UBSan over the whole of `ctest`, so a test that generates input (see the property test in `tests/io/test_tick_csv_hardening.cpp`) exercises the parsing paths under instrumentation for free — that is how the five defects in issue 15 were found. Seed such tests from a **fixed** list of seeds, never a clock or `random_device`: a failure has to be reproducible, and under the bundled minicatch there is no way to report which generated input failed.
 
 ## Architecture
 

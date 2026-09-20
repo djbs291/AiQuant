@@ -2,6 +2,8 @@
 #include <fstream>
 #include <sstream>
 #include <charconv>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <string_view>
@@ -29,10 +31,41 @@ namespace fin::io
         return {b, e};
     }
 
+    // Epoch millis beyond this overflow the nanosecond conversion below. It lands in the year
+    // 2262, so no real feed reaches it, but a fuzzed or corrupt file does — and signed
+    // overflow is undefined behaviour, not a large number.
+    static constexpr long long kMaxEpochMs = std::numeric_limits<long long>::max() / 1'000'000LL;
+
     static Timestamp from_epoch_ms(long long ms)
     {
         using namespace std::chrono;
         return Timestamp(time_point<system_clock, nanoseconds>(nanoseconds{ms * 1'000'000LL}));
+    }
+
+    // Both parsers require the token to be consumed *entirely*. std::from_chars stops at the
+    // first character it cannot use and still reports success, so without the `p == e` check
+    // "1.5abc" reads as 1.5 and "123xyz" as 123. The INI and JSON parsers in fin_app have
+    // always required full consumption; this reader was the odd one out.
+    static bool parse_ll_strict(const char *b, const char *e, long long &out)
+    {
+        if (b == e)
+            return false;
+        auto [p, ec] = std::from_chars(b, e, out);
+        return ec == std::errc{} && p == e;
+    }
+
+    static bool parse_double_strict(const char *b, const char *e, double &out)
+    {
+        if (b == e)
+            return false;
+        auto [p, ec] = std::from_chars(b, e, out);
+        if (ec != std::errc{} || p != e)
+            return false;
+        // from_chars accepts "nan" and "inf" by the standard's general format. A NaN price
+        // is the worst possible value to let through: the resampler compares with `>` and
+        // `<`, which are both false for NaN, so the bar's high and low silently keep the
+        // wrong values and every indicator downstream is poisoned.
+        return std::isfinite(out);
     }
 
     // MVP: expect epoch millis; ISO8601 can be added later if needed.
@@ -44,12 +77,17 @@ namespace fin::io
         std::vector<std::string> headers;
         int idx_ts = -1, idx_sym = -1, idx_price = -1, idx_vol = -1;
         bool header_checked = false;
+        bool unusable = false; // a file-level problem: stop yielding
 
         explicit Impl(std::string path, TickCsvOptions o) : in(path), opt(o) {}
     };
 
     FileTickSource::FileTickSource(std::string path, TickCsvOptions opt)
-        : impl_(std::make_unique<Impl>(std::move(path), opt)) {}
+        : impl_(std::make_unique<Impl>(std::move(path), opt))
+    {
+        if (!impl_->in)
+            error_ = "could not open tick file: " + path;
+    }
 
     // ---- dtor OUT-OF-LINE (critical) ----
     FileTickSource::~FileTickSource() = default;
@@ -72,15 +110,26 @@ namespace fin::io
         return -1;
     }
 
+    static std::string join(const std::vector<std::string> &items)
+    {
+        std::string out;
+        for (std::size_t i = 0; i < items.size(); ++i)
+        {
+            if (i > 0)
+                out += ",";
+            out += items[i];
+        }
+        return out;
+    }
+
     std::optional<Tick> FileTickSource::next()
     {
         auto &I = *impl_;
-        if (!I.in.good())
+        if (I.unusable || !I.in.good())
             return std::nullopt;
 
         while (std::getline(I.in, I.line))
         {
-            ++stats_.rows;
             // Header detection
             if (!I.header_checked)
             {
@@ -92,6 +141,29 @@ namespace fin::io
                     I.idx_price = find_idx(I.headers, I.opt.price_col);
                     I.idx_vol = find_idx(I.headers, I.opt.volume_col);
                     I.header_checked = true;
+
+                    // A missing column used to survive the bounds check below, because that
+                    // check only compared the *largest* index against the row width: with
+                    // `price` absent its index is -1, the maximum comes from the columns that
+                    // are present, and cols[-1] then read off the front of the vector.
+                    const std::string *missing = nullptr;
+                    if (I.idx_ts < 0)
+                        missing = &I.opt.ts_col;
+                    else if (I.idx_sym < 0)
+                        missing = &I.opt.symbol_col;
+                    else if (I.idx_price < 0)
+                        missing = &I.opt.price_col;
+                    else if (I.idx_vol < 0)
+                        missing = &I.opt.volume_col;
+
+                    if (missing)
+                    {
+                        I.unusable = true;
+                        error_ = "tick CSV has no '" + *missing + "' column (header: " +
+                                 join(I.headers) + ")";
+                        return std::nullopt;
+                    }
+
                     // fallthrough to read next physical line
                     continue;
                 }
@@ -107,6 +179,9 @@ namespace fin::io
                 }
             }
 
+            // Counted here, after the header, so `rows == parsed + skipped` holds.
+            ++stats_.rows;
+
             auto cols = split_line(I.line, I.opt.delimiter);
             if (std::max({I.idx_ts, I.idx_sym, I.idx_price, I.idx_vol}) >= (int)cols.size())
             {
@@ -118,22 +193,17 @@ namespace fin::io
             long long ms = 0;
             {
                 auto [b, e] = trim(cols[I.idx_ts]);
-                if (b == e)
-                {
-                    ++stats_.skipped;
-                    continue;
-                } // empty after trim
                 long long x = 0;
-                if (auto [p, ec] = std::from_chars(b, e, x); ec != std::errc{})
+                if (!parse_ll_strict(b, e, x))
                 {
-                    ++stats_.skipped; // not an integer
+                    ++stats_.skipped; // empty, not an integer, or trailing junk
                     continue;
                 }
-                if (x < 0)
+                if (x < 0 || x > kMaxEpochMs)
                 {
-                    ++stats_.skipped;
+                    ++stats_.skipped; // negative, or would overflow the ns conversion
                     continue;
-                } // guard negative
+                }
                 ms = x;
             }
             Timestamp ts = from_epoch_ms(ms);
@@ -143,20 +213,16 @@ namespace fin::io
 
             double price_d = 0.0, vol_d = 0.0;
             {
-                const auto &s = cols[I.idx_price];
-                auto *b = s.data();
-                auto *e = s.data() + s.size();
-                if (auto [p, ec] = std::from_chars(b, e, price_d); ec != std::errc{})
+                auto [b, e] = trim(cols[I.idx_price]);
+                if (!parse_double_strict(b, e, price_d) || price_d < 0.0)
                 {
-                    ++stats_.skipped;
+                    ++stats_.skipped; // unparsable, non-finite, or negative
                     continue;
                 }
             }
             {
-                const auto &s = cols[I.idx_vol];
-                auto *b = s.data();
-                auto *e = s.data() + s.size();
-                if (auto [p, ec] = std::from_chars(b, e, vol_d); ec != std::errc{})
+                auto [b, e] = trim(cols[I.idx_vol]);
+                if (!parse_double_strict(b, e, vol_d) || vol_d < 0.0)
                 {
                     ++stats_.skipped;
                     continue;

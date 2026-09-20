@@ -27,6 +27,8 @@ namespace fin::io
 
     struct ReadStats
     {
+        // `rows` counts data rows only, never the header, so `rows == parsed + skipped` is an
+        // invariant the tests assert rather than a coincidence.
         std::size_t rows = 0, parsed = 0, skipped = 0;
     };
 
@@ -38,10 +40,17 @@ namespace fin::io
         std::optional<fin::core::Tick> next() override;
         const ReadStats &stats() const { return stats_; }
 
+        // Empty unless the file itself is unusable — it could not be opened, or the header is
+        // missing a column every row would need. That is not a row-level skip: every row
+        // would fail for the same reason, so the reader says which column once and yields
+        // nothing. Callers that only ever see "0 candles" should check this to find out why.
+        const std::string &error() const { return error_; }
+
     private:
         struct Impl; // PIMPL keeps headers clean
         std::unique_ptr<Impl> impl_;
         ReadStats stats_{};
+        std::string error_{};
     };
 
 } // namespace fin::io
