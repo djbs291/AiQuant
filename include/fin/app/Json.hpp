@@ -9,8 +9,10 @@
 // so it is strict by design: it rejects trailing garbage, caps nesting depth, and never
 // throws out of parse() — errors come back as a message.
 
+#include <cmath>
 #include <cstddef>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -77,6 +79,23 @@ namespace fin::app::json
     // Parses one complete JSON document. Returns std::nullopt and fills `error` when the input
     // is malformed, has trailing content, or nests deeper than kMaxDepth.
     std::optional<Value> parse(std::string_view text, std::string &error);
+
+    // The writing side of the same contract.
+    //
+    // JSON has no way to spell NaN or Infinity, so streaming a non-finite double straight out
+    // produces a bare `nan` that is not JSON. Readers then disagree about it: jq accepts it,
+    // while Python's json, JavaScript's JSON.parse and the parser above all reject it — so the
+    // document is valid or not depending on who reads it, which is the worst of both.
+    //
+    // A value that JSON cannot represent is written as null. The document stays parseable and
+    // the consumer sees "no number here" rather than a silent lie.
+    inline void write_number(std::ostream &out, double value)
+    {
+        if (std::isfinite(value))
+            out << value;
+        else
+            out << "null";
+    }
 }
 
 #endif // FIN_APP_JSON_HPP
