@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
@@ -26,9 +27,14 @@ namespace fin::ml
             double value = 0.0;
             const char *begin = token.data();
             const char *end = begin + token.size();
-            if (auto [ptr, ec] = std::from_chars(begin, end, value); ec == std::errc{})
-                return value;
-            return std::nullopt;
+            auto [ptr, ec] = std::from_chars(begin, end, value);
+            // Full consumption, as the INI and JSON parsers have always required: without the
+            // `ptr == end` check "0.5abc" read as 0.5. And a non-finite weight is refused
+            // outright — from_chars accepts "nan" by the standard's general format, and one
+            // NaN weight turns every prediction this model ever makes into NaN.
+            if (ec != std::errc{} || ptr != end || !std::isfinite(value))
+                return std::nullopt;
+            return value;
         }
     } // namespace
 
@@ -145,7 +151,12 @@ namespace fin::ml
 
             auto parsed = parse_double(value_token);
             if (!parsed)
-                continue;
+            {
+                // These files are machine-written by save_linear_model, so a value that does
+                // not parse means the file is corrupt. Skipping the line would quietly drop a
+                // feature's weight and leave a model that looks fine and predicts wrongly.
+                return false;
+            }
 
             if (key == "bias" || key == "intercept")
             {
