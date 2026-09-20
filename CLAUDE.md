@@ -107,6 +107,8 @@ When you change a config field, keep these in sync:
 - the Python dict conversion (`bindings/python/aiquant_module.cpp`)
 - `docs/ScenarioConfig.md`
 
+**Writing JSON:** every `double` goes out through `fin::app::json::write_number` (`include/fin/app/Json.hpp`), never straight into the stream. JSON cannot spell NaN or Infinity, so a raw `<<` produces a bare `nan` that `jq` accepts and every strict reader — including this project's own `fin::app::json::parse` — rejects. The helper writes `null` instead. `tests/app/test_json_contract.cpp` parses the writer's output with the project's reader, so a new raw `<<` of a double will be caught there.
+
 Adding a **feature** is a different list: register it in `feature_catalog()` (`src/fin/indicators/FeatureSpec.cpp`), give it an adapter in `adapters/CandleAdapters.hpp` if one does not exist, add any new period to `FeatureParams` *and* to `ScenarioConfig` (plus `make_feature_params` in `ScenarioRunner.cpp`), and document it in the catalogue table in `docs/ScenarioConfig.md`. Names are canonical and lowercase — no aliases, because the name is written verbatim into the model file.
 
 ## CI

@@ -34,7 +34,7 @@ key = value  # optional inline comment
 | `fee`, `fee_per_trade` | double | engine default | Flat fee per trade. |
 | `model_out`, `model_output` | string | none | Save trained linear model to this path. |
 | `preview`, `preview_limit` | size_t | `3` | Rows of validation preview copied to stdout. |
-| `features` | list | `close,ema_fast,rsi,macd,macd_signal,macd_hist` | Comma-separated model feature set, in column order. An unknown name is an error (unlike an unknown key, which is ignored). See the catalogue below. |
+| `features` | list | `close,ema_fast,rsi,macd,macd_signal,macd_hist` | Comma-separated model feature set, in column order. An unknown name is an error. See the catalogue below. |
 | `sma`, `sma_period` | size_t | `14` | SMA period, for the `sma` feature. |
 | `bb_period` | size_t | `20` | Bollinger period, for `bb_upper`/`bb_mid`/`bb_lower`. |
 | `bb_k` | double | `2.0` | Bollinger band width in standard deviations. |
@@ -102,6 +102,27 @@ has no `partial_fit`, and a run that reported online learning without doing any 
 than an error.
 
 See `examples/sgd_online.ini` for a tuned, runnable configuration.
+
+## Validation
+
+The load fails, naming the key and the line, rather than accepting a value that cannot mean
+anything:
+
+- **An unknown key is an error.** It used to be ignored. Silence meant a typo trained a
+  different model than the one asked for and said nothing about it: `rsi_peroid = 20` left the
+  period at its default of 14 and the run looked entirely normal.
+- **Every period must be at least 1.** A zero period does not fail where it is written — the
+  indicator simply never becomes ready, and the run dies much later with `Insufficient data
+  after indicator warmup`, which blames the data for a configuration mistake.
+- **`bb_k` must be greater than zero** and **`ridge` must not be negative.** A negative ridge
+  term is not regularization but its opposite; on the sample scenario it quietly made the
+  fitted model about thirty times worse.
+
+`train_ratio` is the exception: it is *clamped* to `[0.1, 0.95]` rather than rejected, which is
+long-standing behaviour the runner relies on.
+
+Note that `load_scenario_file` fills the config as it parses, so a failed load leaves partial
+values behind. Pass a fresh `ScenarioConfig` for each file.
 
 ## Boolean Parsing
 

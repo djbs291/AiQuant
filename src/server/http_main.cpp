@@ -594,7 +594,11 @@ namespace
         const auto response = predictor.predict(request); // invalid_argument -> 400 upstream
 
         std::ostringstream out;
-        out << "{\n  \"prediction\": " << response.prediction << ",\n  \"features\": ";
+        out << "{\n  \"prediction\": ";
+        // A model file can carry weights that make this non-finite. Streaming it raw would
+        // put a bare nan in the body, which is not JSON.
+        fin::app::json::write_number(out, response.prediction);
+        out << ",\n  \"features\": ";
         append_feature_array(out, response.features);
         out << ",\n  \"model\": " << std::quoted(response.model_path) << "\n}\n";
         send_response(client, 200, "OK", out.str());
@@ -646,12 +650,13 @@ namespace
 
         std::ostringstream out;
         out << "{\n  \"signal\": \"" << signal_type_to_cstr(response.signal.type) << "\",\n"
-            << "  \"score\": " << response.signal.score << ",\n"
-            << "  \"reason\": " << std::quoted(response.signal.source) << ",\n"
+            << "  \"score\": ";
+        fin::app::json::write_number(out, response.signal.score);
+        out << ",\n  \"reason\": " << std::quoted(response.signal.source) << ",\n"
             << "  \"symbol\": " << std::quoted(response.signal.symbol) << ",\n"
             << "  \"prediction\": ";
         if (response.prediction)
-            out << *response.prediction;
+            fin::app::json::write_number(out, *response.prediction);
         else
             out << "null";
         out << ",\n  \"features\": ";

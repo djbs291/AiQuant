@@ -90,6 +90,35 @@ TEST_CASE("LinearModel loads from file", "[ml][linear]")
     std::filesystem::remove(path);
 }
 
+TEST_CASE("LinearModel refuses a corrupt weight file", "[ml][linear]")
+{
+    // The model file reader used the same lax from_chars the tick CSV reader did: it checked
+    // the error code but never that the whole token was consumed, and it accepted "nan".
+    // A NaN weight makes every prediction NaN, and it did so without a word.
+    const auto nan_path = std::filesystem::temp_directory_path() / "aiquant_model_nan.csv";
+    {
+        std::ofstream out(nan_path);
+        out << "bias,0.0\n";
+        out << "close,nan\n";
+    }
+
+    LinearModel nan_model;
+    REQUIRE_FALSE(nan_model.load_from_file(nan_path.string()));
+    REQUIRE_FALSE(nan_model.is_ready());
+    std::filesystem::remove(nan_path);
+
+    const auto junk_path = std::filesystem::temp_directory_path() / "aiquant_model_junk.csv";
+    {
+        std::ofstream out(junk_path);
+        out << "bias,0.0\n";
+        out << "close,0.5abc\n";
+    }
+
+    LinearModel junk_model;
+    REQUIRE_FALSE(junk_model.load_from_file(junk_path.string()));
+    std::filesystem::remove(junk_path);
+}
+
 TEST_CASE("LinearTrainer recovers known weights", "[ml][linear]")
 {
     const double bias = 0.25;

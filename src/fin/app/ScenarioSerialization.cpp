@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <sstream>
 
+#include "fin/app/Json.hpp" // json::write_number: never emit a bare nan/inf
+
 namespace fin::app
 {
     namespace
@@ -28,15 +30,18 @@ namespace fin::app
 
         void append_metrics_json(std::ostream &out, const ScenarioResult &result)
         {
-            out << "  \"metrics\": {\n"
-                << "    \"final_cash\": " << result.metrics.final_cash << ",\n"
-                << "    \"pnl\": " << result.metrics.pnl << ",\n"
-                << "    \"return_pct\": " << result.metrics.return_pct << ",\n"
-                << "    \"trades\": " << result.metrics.trades << ",\n"
-                << "    \"wins\": " << result.metrics.wins << ",\n"
-                << "    \"losses\": " << result.metrics.losses << ",\n"
-                << "    \"max_drawdown\": " << result.metrics.max_drawdown << "\n"
-                << "  },\n";
+            out << "  \"metrics\": {\n    \"final_cash\": ";
+            json::write_number(out, result.metrics.final_cash);
+            out << ",\n    \"pnl\": ";
+            json::write_number(out, result.metrics.pnl);
+            out << ",\n    \"return_pct\": ";
+            json::write_number(out, result.metrics.return_pct);
+            out << ",\n    \"trades\": " << result.metrics.trades
+                << ",\n    \"wins\": " << result.metrics.wins
+                << ",\n    \"losses\": " << result.metrics.losses
+                << ",\n    \"max_drawdown\": ";
+            json::write_number(out, result.metrics.max_drawdown);
+            out << "\n  },\n";
         }
     }
 
@@ -62,20 +67,29 @@ namespace fin::app
         out << "  \"online_updates\": " << result.online_updates << ",\n";
         out << "  \"training_samples\": " << result.training.samples << ",\n";
         out << "  \"validation_samples\": " << result.validation_samples << ",\n";
-        out << "  \"training_mse\": " << result.training.mse << ",\n";
-        out << "  \"validation_rmse\": " << result.validation_rmse << ",\n";
+        // A degenerate config (a zero period, say) can leave these NaN. They go out as null
+        // rather than as a bare nan, which no strict reader accepts.
+        out << "  \"training_mse\": ";
+        json::write_number(out, result.training.mse);
+        out << ",\n  \"validation_rmse\": ";
+        json::write_number(out, result.validation_rmse);
+        out << ",\n";
         // Zero unless online updating is on, where it is the predict-then-learn error over
         // the same rows validation_rmse scores with the frozen model.
-        out << "  \"online_validation_rmse\": " << result.online_validation_rmse << ",\n";
+        out << "  \"online_validation_rmse\": ";
+        json::write_number(out, result.online_validation_rmse);
+        out << ",\n";
         append_metrics_json(out, result);
         out << "  \"model_saved\": " << (result.model_saved ? "true" : "false") << ",\n";
         out << "  \"validation_preview\": [\n";
         for (std::size_t i = 0; i < result.validation_preview.size(); ++i)
         {
             const auto &row = result.validation_preview[i];
-            out << "    {\"ts_ms\": " << row.ts_ms
-                << ", \"predicted_delta\": " << row.predicted_delta
-                << ", \"actual_delta\": " << row.actual_delta << "}";
+            out << "    {\"ts_ms\": " << row.ts_ms << ", \"predicted_delta\": ";
+            json::write_number(out, row.predicted_delta);
+            out << ", \"actual_delta\": ";
+            json::write_number(out, row.actual_delta);
+            out << "}";
             if (i + 1 < result.validation_preview.size())
                 out << ',';
             out << "\n";
