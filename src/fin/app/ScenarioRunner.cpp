@@ -70,17 +70,145 @@ namespace fin::app
         }
     }
 
+    bool validate_scenario_config(const ScenarioConfig &config, std::string &error)
+    {
+        // A period of zero does not fail loudly: the indicator simply never becomes ready,
+        // and the run dies much later with "Insufficient data after indicator warmup", which
+        // blames the data for what is a configuration mistake.
+        const std::pair<const char *, std::size_t> periods[] = {
+            {"ema_fast", config.ema_fast},
+            {"ema_slow", config.ema_slow},
+            {"rsi", config.rsi_period},
+            {"macd_fast", config.macd_fast},
+            {"macd_slow", config.macd_slow},
+            {"macd_signal", config.macd_signal},
+            {"sma", config.sma_period},
+            {"bb_period", config.bb_period},
+            {"atr", config.atr_period},
+            {"adx", config.adx_period},
+            {"stoch_k", config.stoch_k_period},
+            {"stoch_d", config.stoch_d_period},
+            {"zscore", config.zscore_period},
+            {"momentum", config.momentum_period},
+            {"sgd_epochs", config.sgd.epochs},
+        };
+        for (const auto &[name, value] : periods)
+        {
+            if (value == 0)
+            {
+                error = std::string("Invalid ") + name + ": must be >= 1";
+                return false;
+            }
+        }
+
+        // Every range check below is a comparison, and NaN passes a comparison by being false
+        // both ways, so finiteness comes first. train_ratio has no range to check (the runner
+        // clamps it), but a NaN one reaches clamp_training_rows and a NaN -> size_t cast,
+        // which is undefined behaviour.
+        const std::pair<const char *, double> numbers[] = {
+            {"train_ratio", config.train_ratio},
+            {"ridge", config.ridge_lambda},
+            {"bb_k", config.bb_k},
+            {"rsi_buy", config.rsi_buy},
+            {"rsi_sell", config.rsi_sell},
+            {"cash", config.initial_cash.value_or(1.0)},
+            {"qty", config.trade_qty.value_or(1.0)},
+            {"fee", config.fee_per_trade.value_or(0.0)},
+            {"sgd_learning_rate", config.sgd.learning_rate},
+            {"sgd_l2", config.sgd.l2},
+            {"sgd_power_t", config.sgd.power_t},
+        };
+        for (const auto &[name, value] : numbers)
+        {
+            if (!std::isfinite(value))
+            {
+                error = std::string("Invalid ") + name + ": must be a finite number";
+                return false;
+            }
+        }
+
+        if (config.bb_k <= 0.0)
+        {
+            error = "Invalid bb_k: the band width must be > 0";
+            return false;
+        }
+
+        // A negative ridge term is not regularization, it is anti-regularization: it quietly
+        // made the fitted model about thirty times worse on the sample scenario.
+        if (config.ridge_lambda < 0.0)
+        {
+            error = "Invalid ridge: the regularization term must be >= 0";
+            return false;
+        }
+
+        const std::pair<const char *, double> thresholds[] = {
+            {"rsi_buy", config.rsi_buy},
+            {"rsi_sell", config.rsi_sell},
+        };
+        for (const auto &[name, value] : thresholds)
+        {
+            if (value < 0.0 || value > 100.0)
+            {
+                error = std::string("Invalid ") + name + ": an RSI threshold lies in [0, 100]";
+                return false;
+            }
+        }
+
+        // The backtester trusts all three. A negative quantity makes a Buy pay out, so on the
+        // MVP scenario `qty = -5` reported +844% without a single trade; a negative fee turned
+        // every one of 18 trades into a win.
+        if (config.initial_cash && *config.initial_cash <= 0.0)
+        {
+            error = "Invalid cash: the starting cash must be > 0";
+            return false;
+        }
+        if (config.trade_qty && *config.trade_qty <= 0.0)
+        {
+            error = "Invalid qty: the quantity per trade must be > 0";
+            return false;
+        }
+        if (config.fee_per_trade && *config.fee_per_trade < 0.0)
+        {
+            error = "Invalid fee: the fee per trade must be >= 0";
+            return false;
+        }
+
+        // SgdRegressor refuses these too, but only when model = sgd; a scenario that carries
+        // them while training ridge is still carrying a mistake.
+        if (config.sgd.learning_rate <= 0.0)
+        {
+            error = "Invalid sgd_learning_rate: must be > 0";
+            return false;
+        }
+        if (config.sgd.l2 < 0.0)
+        {
+            error = "Invalid sgd_l2: must be >= 0";
+            return false;
+        }
+        if (config.sgd.power_t < 0.0)
+        {
+            error = "Invalid sgd_power_t: must be >= 0";
+            return false;
+        }
+
+        if (config.online_update && config.model != ModelKind::Sgd)
+        {
+            // Accepting it silently would report an online run whose model never moved.
+            error = "online_update requires model = sgd: the ridge model is a closed-form fit "
+                    "with no partial_fit to call";
+            return false;
+        }
+
+        return true;
+    }
+
     ScenarioResult run_scenario(const ScenarioConfig &config)
     {
         if (config.ticks_path.empty())
             throw std::invalid_argument("ScenarioConfig.ticks_path is empty");
 
-        if (config.online_update && config.model != ModelKind::Sgd)
-        {
-            // Accepting it silently would report an online run whose model never moved.
-            throw std::invalid_argument("online_update requires model = sgd: the ridge model is a "
-                                        "closed-form fit with no partial_fit to call");
-        }
+        if (std::string error; !validate_scenario_config(config, error))
+            throw std::invalid_argument(error);
 
         fin::io::TickCsvOptions csv_opt{};
         auto res = fin::io::resample_csv_with_stats(config.ticks_path, config.timeframe, csv_opt,

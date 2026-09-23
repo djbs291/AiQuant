@@ -111,5 +111,15 @@ namespace fin::app
         bool model_saved = false;
     };
 
+    // The values no run can make sense of: a zero period, a non-finite number, a negative
+    // ridge or fee, a quantity or starting cash that is not positive, an RSI threshold outside
+    // [0, 100], SGD options the regressor would refuse, and online_update without sgd.
+    // Returns false with a message naming the key. Both the INI loader and run_scenario call
+    // it, so a config built from CLI flags, a Python dict or HTTP JSON meets the same rules
+    // as one read from a file. It does not check ticks_path, which each caller reports in
+    // its own words.
+    bool validate_scenario_config(const ScenarioConfig &config, std::string &error);
+
+    // Throws std::invalid_argument for a config that validate_scenario_config refuses.
     ScenarioResult run_scenario(const ScenarioConfig &config);
 }

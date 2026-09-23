@@ -137,9 +137,27 @@ anything:
 - **`bb_k` must be greater than zero** and **`ridge` must not be negative.** A negative ridge
   term is not regularization but its opposite; on the sample scenario it quietly made the
   fitted model about thirty times worse.
+- **Every number must be finite.** `nan`, `inf` and `infinity` are refused at the line that
+  holds them. They used to parse, and every range check is a comparison that NaN passes by
+  being false both ways; `train_ratio = nan` went on to a NaN-to-integer cast, which is
+  undefined behaviour.
+- **`cash` and `qty` must be greater than zero, and `fee` must not be negative.** The
+  backtester trusts all three: on the MVP scenario `qty = -5` reported a return of +844% with
+  zero trades, because buying a negative quantity pays out, and `fee = -1000` turned 18
+  trades into 18 wins.
+- **`rsi_buy` and `rsi_sell` must lie in `[0, 100]`**, the range an RSI can take.
+- **The `sgd_*` options are checked even when `model = ridge`:** `sgd_learning_rate > 0`,
+  `sgd_l2 >= 0`, `sgd_power_t >= 0`, `sgd_epochs >= 1`. A scenario that carries a bad value
+  it does not use is still carrying a mistake.
+- **`online_update = true` requires `model = sgd`**, in either order in the file.
 
-`train_ratio` is the exception: it is *clamped* to `[0.1, 0.95]` rather than rejected, which is
-long-standing behaviour the runner relies on.
+`train_ratio` is the exception: any finite value is accepted and *clamped* to `[0.1, 0.95]`,
+which is long-standing behaviour the runner relies on.
+
+These rules are not specific to the INI format. They live in
+`fin::app::validate_scenario_config`, which `run_scenario` also calls, so a config built from
+CLI flags, a Python dict or the HTTP JSON is refused the same way (`std::invalid_argument`,
+which Python sees as `ValueError`).
 
 Note that `load_scenario_file` fills the config as it parses, so a failed load leaves partial
 values behind. Pass a fresh `ScenarioConfig` for each file.

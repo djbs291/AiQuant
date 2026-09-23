@@ -3,11 +3,11 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <optional>
 #include <sstream>
-#include <utility> // std::pair, for the range-check table at the end of the load
 
 #include "fin/app/ScenarioUtils.hpp"
 #include "fin/indicators/FeatureSpec.hpp" // find_feature: reject unknown feature names
@@ -48,12 +48,19 @@ namespace fin::app
             return std::nullopt;
         }
 
+        // from_chars accepts "nan" and "inf". Refusing them here names the line, which the
+        // range checks at the end of the load cannot, and every one of those checks is a
+        // comparison that NaN would pass by being false both ways.
         bool parse_double_value(const std::string &text, double &out)
         {
             const char *begin = text.c_str();
             const char *end = begin + text.size();
-            auto [ptr, ec] = std::from_chars(begin, end, out);
-            return ec == std::errc{} && ptr == end;
+            double v = 0.0;
+            auto [ptr, ec] = std::from_chars(begin, end, v);
+            if (ec != std::errc{} || ptr != end || !std::isfinite(v))
+                return false;
+            out = v;
+            return true;
         }
 
         bool parse_size_value(const std::string &text, std::size_t &out)
@@ -170,8 +177,8 @@ namespace fin::app
                     error = "Invalid features at line " + std::to_string(line_no) + ": " + list_error;
                     return false;
                 }
-                // An unknown key is ignored silently, but an unknown *feature* is not: dropping
-                // it would quietly train a different model than the one asked for.
+                // An unknown feature is refused like an unknown key: dropping it would quietly
+                // train a different model than the one asked for.
                 for (const auto &name : cfg.features)
                 {
                     if (fin::indicators::find_feature(name) == nullptr)
@@ -524,50 +531,8 @@ namespace fin::app
             return false;
         }
 
-        // Range checks in one pass rather than at each parse site. A period of zero does not
-        // fail loudly: the indicator simply never becomes ready, and the run dies much later
-        // with "Insufficient data after indicator warmup", which blames the data for what is
-        // a configuration mistake.
-        const std::pair<const char *, std::size_t> periods[] = {
-            {"ema_fast", cfg.ema_fast},
-            {"ema_slow", cfg.ema_slow},
-            {"rsi", cfg.rsi_period},
-            {"macd_fast", cfg.macd_fast},
-            {"macd_slow", cfg.macd_slow},
-            {"macd_signal", cfg.macd_signal},
-            {"sma", cfg.sma_period},
-            {"bb_period", cfg.bb_period},
-            {"atr", cfg.atr_period},
-            {"adx", cfg.adx_period},
-            {"stoch_k", cfg.stoch_k_period},
-            {"stoch_d", cfg.stoch_d_period},
-            {"zscore", cfg.zscore_period},
-            {"momentum", cfg.momentum_period},
-        };
-        for (const auto &[name, value] : periods)
-        {
-            if (value == 0)
-            {
-                error = std::string("Invalid ") + name + ": a period must be >= 1";
-                return false;
-            }
-        }
-
-        if (cfg.bb_k <= 0.0)
-        {
-            error = "Invalid bb_k: the band width must be > 0";
-            return false;
-        }
-
-        // A negative ridge term is not regularization, it is anti-regularization: it quietly
-        // made the fitted model about thirty times worse on the sample scenario.
-        if (cfg.ridge_lambda < 0.0)
-        {
-            error = "Invalid ridge: the regularization term must be >= 0";
-            return false;
-        }
-
-        return true;
+        // Range checks in one pass rather than at each parse site, shared with run_scenario so
+        // a config built from CLI flags or a Python dict meets the same rules as this file.
+        return validate_scenario_config(cfg, error);
     }
 }
-
