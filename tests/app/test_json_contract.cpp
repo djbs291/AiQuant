@@ -32,19 +32,22 @@ TEST_CASE("Scenario JSON is always parseable by the project's own reader", "[app
     std::filesystem::remove(ticks);
 }
 
-TEST_CASE("A degenerate config yields null, never a bare nan", "[app][json]")
+TEST_CASE("A non-finite result yields null, never a bare nan", "[app][json]")
 {
-    // load_scenario_file now refuses a zero period, but run_scenario takes a ScenarioConfig
-    // directly — the Python module builds one from a dict, and nothing there goes through the
-    // INI validation. So the writer still has to cope with a NaN reaching it.
+    // This used to be reached with `bb_period = 0`, which run_scenario accepted from a config
+    // built in code and which left the fit degenerate. run_scenario now refuses that config,
+    // but a NaN can still come out of a valid one (a model can diverge, a series can be
+    // flat), so the writer's half of the contract is held here by poisoning a real result.
     const auto ticks = scenario_test::write_temp_ticks_csv(256);
 
     fin::app::ScenarioConfig cfg{};
     cfg.ticks_path = ticks.string();
-    cfg.features = {"close", "bb_mid"};
-    cfg.bb_period = 0; // leaves the fit degenerate: training_mse and validation_rmse go NaN
 
-    const auto result = fin::app::run_scenario(cfg);
+    auto result = fin::app::run_scenario(cfg);
+    const double zero = 0.0;
+    result.training.mse = zero / zero;
+    result.validation_rmse = 1.0 / zero;
+    result.metrics.pnl = -1.0 / zero;
     const std::string document = fin::app::scenario_result_to_json(cfg, result);
 
     // The bug this is about: `"training_mse": nan` is not JSON, whatever jq may accept.
