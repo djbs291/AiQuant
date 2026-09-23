@@ -8,6 +8,9 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
 
 #include "fin/app/ScenarioUtils.hpp"
 #include "fin/indicators/FeatureSpec.hpp" // find_feature: reject unknown feature names
@@ -115,6 +118,52 @@ namespace fin::app
             out = std::move(items);
             return true;
         }
+
+        // Every alias maps to one canonical key, so the dispatch below has a single name per
+        // field and a repeated field is caught whichever spelling each occurrence uses. A key
+        // with no entry is its own canonical name.
+        std::string canonical_key(const std::string &lowered)
+        {
+            static const std::pair<std::string_view, std::string_view> aliases[] = {
+                {"ticks_path", "ticks"},
+                {"data", "ticks"},
+                {"timeframe", "tf"},
+                {"ridge_lambda", "ridge"},
+                {"sma_period", "sma"},
+                {"atr_period", "atr"},
+                {"adx_period", "adx"},
+                {"stoch_k_period", "stoch_k"},
+                {"stoch_d_period", "stoch_d"},
+                {"zscore_period", "zscore"},
+                {"momentum_period", "momentum"},
+                {"initial_cash", "cash"},
+                {"trade_qty", "qty"},
+                {"fee_per_trade", "fee"},
+                {"model_output", "model_out"},
+                {"preview_limit", "preview"},
+                {"sgd_lr", "sgd_learning_rate"},
+                {"online", "online_update"},
+            };
+            for (const auto &[alias, canonical] : aliases)
+            {
+                if (lowered == alias)
+                    return std::string(canonical);
+            }
+            return lowered;
+        }
+
+        // A '#' starts an inline comment only after whitespace, the convention Python's
+        // configparser uses for inline_comment_prefixes. Anywhere else it belongs to the
+        // value: `ticks = runs#3.csv` used to load as `runs`, and `rsi = 10#x` as 10.
+        std::size_t find_inline_comment(const std::string &line)
+        {
+            for (std::size_t i = 1; i < line.size(); ++i)
+            {
+                if (line[i] == '#' && std::isspace(static_cast<unsigned char>(line[i - 1])))
+                    return i;
+            }
+            return std::string::npos;
+        }
     } // namespace
 
     bool load_scenario_file(const std::string &path, ScenarioConfig &cfg, std::string &error)
@@ -126,6 +175,11 @@ namespace fin::app
             return false;
         }
 
+        // Which line set each field, by canonical name. A repeat used to override silently, so
+        // `rsi = 10` further down a file than `rsi = 20` won without a word, and so did
+        // `sma_period` over `sma`.
+        std::unordered_map<std::string, std::pair<std::string, std::size_t>> seen;
+
         std::string line;
         std::size_t line_no = 0;
         while (std::getline(in, line))
@@ -135,7 +189,7 @@ namespace fin::app
             if (line.empty() || line[0] == '#')
                 continue;
 
-            auto comment_pos = line.find('#');
+            auto comment_pos = find_inline_comment(line);
             if (comment_pos != std::string::npos)
             {
                 line.erase(comment_pos);
@@ -165,11 +219,23 @@ namespace fin::app
             std::transform(key.begin(), key.end(), lowered.begin(), [](unsigned char ch)
                            { return static_cast<char>(std::tolower(ch)); });
 
-            if (lowered == "ticks" || lowered == "ticks_path" || lowered == "data")
+            const std::string name = canonical_key(lowered);
+            // use_ema_crossover and no_ema_xover are one field spelled with opposite meanings,
+            // so setting both is a repeat even though they dispatch separately.
+            const std::string field = (name == "no_ema_xover") ? "use_ema_crossover" : name;
+            if (auto [it, inserted] = seen.try_emplace(field, key, line_no); !inserted)
+            {
+                error = "Duplicate key '" + key + "' at line " + std::to_string(line_no) +
+                        ": already set by '" + it->second.first + "' at line " +
+                        std::to_string(it->second.second);
+                return false;
+            }
+
+            if (name == "ticks")
             {
                 cfg.ticks_path = value;
             }
-            else if (lowered == "features")
+            else if (name == "features")
             {
                 std::string list_error;
                 if (!parse_list_value(value, cfg.features, list_error))
@@ -188,7 +254,7 @@ namespace fin::app
                     }
                 }
             }
-            else if (lowered == "sma" || lowered == "sma_period")
+            else if (name == "sma")
             {
                 if (!parse_size_value(value, cfg.sma_period))
                 {
@@ -196,7 +262,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "bb_period")
+            else if (name == "bb_period")
             {
                 if (!parse_size_value(value, cfg.bb_period))
                 {
@@ -204,7 +270,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "bb_k")
+            else if (name == "bb_k")
             {
                 if (!parse_double_value(value, cfg.bb_k))
                 {
@@ -212,7 +278,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "atr" || lowered == "atr_period")
+            else if (name == "atr")
             {
                 if (!parse_size_value(value, cfg.atr_period))
                 {
@@ -220,7 +286,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "adx" || lowered == "adx_period")
+            else if (name == "adx")
             {
                 if (!parse_size_value(value, cfg.adx_period))
                 {
@@ -228,7 +294,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "stoch_k" || lowered == "stoch_k_period")
+            else if (name == "stoch_k")
             {
                 if (!parse_size_value(value, cfg.stoch_k_period))
                 {
@@ -236,7 +302,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "stoch_d" || lowered == "stoch_d_period")
+            else if (name == "stoch_d")
             {
                 if (!parse_size_value(value, cfg.stoch_d_period))
                 {
@@ -244,7 +310,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "zscore" || lowered == "zscore_period")
+            else if (name == "zscore")
             {
                 if (!parse_size_value(value, cfg.zscore_period))
                 {
@@ -252,7 +318,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "momentum" || lowered == "momentum_period")
+            else if (name == "momentum")
             {
                 if (!parse_size_value(value, cfg.momentum_period))
                 {
@@ -260,7 +326,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "tf" || lowered == "timeframe")
+            else if (name == "tf")
             {
                 if (auto tf = parse_timeframe_token(value))
                     cfg.timeframe = *tf;
@@ -270,7 +336,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "train_ratio")
+            else if (name == "train_ratio")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -280,7 +346,7 @@ namespace fin::app
                 }
                 cfg.train_ratio = v;
             }
-            else if (lowered == "ridge" || lowered == "ridge_lambda")
+            else if (name == "ridge")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -290,7 +356,7 @@ namespace fin::app
                 }
                 cfg.ridge_lambda = v;
             }
-            else if (lowered == "ema_fast")
+            else if (name == "ema_fast")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -300,7 +366,7 @@ namespace fin::app
                 }
                 cfg.ema_fast = v;
             }
-            else if (lowered == "ema_slow")
+            else if (name == "ema_slow")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -310,7 +376,7 @@ namespace fin::app
                 }
                 cfg.ema_slow = v;
             }
-            else if (lowered == "rsi")
+            else if (name == "rsi")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -320,7 +386,7 @@ namespace fin::app
                 }
                 cfg.rsi_period = v;
             }
-            else if (lowered == "macd_fast")
+            else if (name == "macd_fast")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -330,7 +396,7 @@ namespace fin::app
                 }
                 cfg.macd_fast = v;
             }
-            else if (lowered == "macd_slow")
+            else if (name == "macd_slow")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -340,7 +406,7 @@ namespace fin::app
                 }
                 cfg.macd_slow = v;
             }
-            else if (lowered == "macd_signal")
+            else if (name == "macd_signal")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -350,7 +416,7 @@ namespace fin::app
                 }
                 cfg.macd_signal = v;
             }
-            else if (lowered == "rsi_buy")
+            else if (name == "rsi_buy")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -360,7 +426,7 @@ namespace fin::app
                 }
                 cfg.rsi_buy = v;
             }
-            else if (lowered == "rsi_sell")
+            else if (name == "rsi_sell")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -370,7 +436,7 @@ namespace fin::app
                 }
                 cfg.rsi_sell = v;
             }
-            else if (lowered == "use_ema_crossover")
+            else if (name == "use_ema_crossover")
             {
                 auto b = parse_bool_value(value);
                 if (!b)
@@ -380,7 +446,7 @@ namespace fin::app
                 }
                 cfg.use_ema_crossover = *b;
             }
-            else if (lowered == "no_ema_xover")
+            else if (name == "no_ema_xover")
             {
                 auto b = parse_bool_value(value);
                 if (!b)
@@ -390,7 +456,7 @@ namespace fin::app
                 }
                 cfg.use_ema_crossover = !*b;
             }
-            else if (lowered == "cash" || lowered == "initial_cash")
+            else if (name == "cash")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -400,7 +466,7 @@ namespace fin::app
                 }
                 cfg.initial_cash = v;
             }
-            else if (lowered == "qty" || lowered == "trade_qty")
+            else if (name == "qty")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -410,7 +476,7 @@ namespace fin::app
                 }
                 cfg.trade_qty = v;
             }
-            else if (lowered == "fee" || lowered == "fee_per_trade")
+            else if (name == "fee")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -420,11 +486,11 @@ namespace fin::app
                 }
                 cfg.fee_per_trade = v;
             }
-            else if (lowered == "model_out" || lowered == "model_output")
+            else if (name == "model_out")
             {
                 cfg.model_output_path = value;
             }
-            else if (lowered == "preview" || lowered == "preview_limit")
+            else if (name == "preview")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -434,7 +500,7 @@ namespace fin::app
                 }
                 cfg.validation_preview_limit = v;
             }
-            else if (lowered == "model")
+            else if (name == "model")
             {
                 std::string token = value;
                 std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
@@ -450,7 +516,7 @@ namespace fin::app
                     return false;
                 }
             }
-            else if (lowered == "sgd_learning_rate" || lowered == "sgd_lr")
+            else if (name == "sgd_learning_rate")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -460,7 +526,7 @@ namespace fin::app
                 }
                 cfg.sgd.learning_rate = v;
             }
-            else if (lowered == "sgd_l2")
+            else if (name == "sgd_l2")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -470,7 +536,7 @@ namespace fin::app
                 }
                 cfg.sgd.l2 = v;
             }
-            else if (lowered == "sgd_epochs")
+            else if (name == "sgd_epochs")
             {
                 std::size_t v = 0;
                 if (!parse_size_value(value, v))
@@ -480,7 +546,7 @@ namespace fin::app
                 }
                 cfg.sgd.epochs = v;
             }
-            else if (lowered == "sgd_power_t")
+            else if (name == "sgd_power_t")
             {
                 double v = 0.0;
                 if (!parse_double_value(value, v))
@@ -490,7 +556,7 @@ namespace fin::app
                 }
                 cfg.sgd.power_t = v;
             }
-            else if (lowered == "sgd_standardize")
+            else if (name == "sgd_standardize")
             {
                 auto b = parse_bool_value(value);
                 if (!b)
@@ -500,7 +566,7 @@ namespace fin::app
                 }
                 cfg.sgd.standardize = *b;
             }
-            else if (lowered == "online_update" || lowered == "online")
+            else if (name == "online_update")
             {
                 auto b = parse_bool_value(value);
                 if (!b)
@@ -510,7 +576,7 @@ namespace fin::app
                 }
                 cfg.online_update = *b;
             }
-            else if (lowered == "symbol")
+            else if (name == "symbol")
             {
                 // Case-sensitive, unlike the keys: ticker symbols are not ours to fold.
                 cfg.symbol = value;
