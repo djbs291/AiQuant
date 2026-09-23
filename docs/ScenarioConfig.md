@@ -8,8 +8,13 @@ key = value  # optional inline comment
 
 - Leading/trailing whitespace is ignored.
 - Empty lines or ones starting with `#` are ignored.
-- Inline comments use `#` as well; everything after it is removed.
+- Inline comments use `#` as well, but only when the `#` follows whitespace: `rsi = 10 # note`
+  is a comment, while `ticks = runs#3.csv` keeps its `#`. A value glued to a `#`, as in
+  `rsi = 10#x`, is therefore not a number and is refused rather than read as `10`.
 - Keys are case-insensitive; values are case-sensitive except for boolean tokens.
+- Each setting may appear once. A repeat is an error, whichever spelling it uses: `rsi` twice,
+  `RSI` after `rsi`, an alias after its key (`sma_period` after `sma`), or both
+  `use_ema_crossover` and `no_ema_xover`, which set the same flag.
 
 ## Supported Keys
 
@@ -131,6 +136,8 @@ anything:
 - **An unknown key is an error.** It used to be ignored. Silence meant a typo trained a
   different model than the one asked for and said nothing about it: `rsi_peroid = 20` left the
   period at its default of 14 and the run looked entirely normal.
+- **A key set twice is an error**, naming both lines. The later value used to win silently,
+  which is the same failure as the typo above: the file says one thing and the run does another.
 - **Every period must be at least 1.** A zero period does not fail where it is written — the
   indicator simply never becomes ready, and the run dies much later with `Insufficient data
   after indicator warmup`, which blames the data for a configuration mistake.
