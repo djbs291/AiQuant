@@ -83,7 +83,8 @@ namespace fin::app
         }
 
         fin::io::TickCsvOptions csv_opt{};
-        auto res = fin::io::resample_csv_with_stats(config.ticks_path, config.timeframe, csv_opt);
+        auto res = fin::io::resample_csv_with_stats(config.ticks_path, config.timeframe, csv_opt,
+                                                   config.symbol);
 
         // A file-level problem — unopenable, or a header missing a column every row needs —
         // would otherwise surface further down as "0 candles produced 0 feature rows", which
@@ -93,6 +94,8 @@ namespace fin::app
 
         ScenarioResult result{};
         result.candles = res.candles.size();
+        result.symbol = res.symbol;
+        result.ticks_other_symbol = res.ticks_other_symbol;
         result.model = (config.model == ModelKind::Sgd) ? "sgd" : "ridge";
         result.online_update = config.online_update;
 

@@ -180,6 +180,16 @@ namespace
             cfg.ticks_path = ticks.cast<std::string>();
         }
 
+        if (py::object symbol = get_if_present(dict, "symbol", &present); present)
+        {
+            if (!py::isinstance<py::str>(symbol))
+            {
+                error = "symbol must be a string";
+                return false;
+            }
+            cfg.symbol = symbol.cast<std::string>();
+        }
+
         if (py::object tf = get_if_present(dict, "timeframe", &present); present)
         {
             if (!py::isinstance<py::str>(tf))
@@ -275,6 +285,8 @@ namespace
         py::dict root;
         root["ticks_path"] = cfg.ticks_path;
         root["timeframe"] = timeframe_to_str(cfg.timeframe);
+        root["symbol"] = result.symbol;
+        root["ticks_other_symbol"] = result.ticks_other_symbol;
         root["candles"] = result.candles;
         root["warmup_candles"] = result.warmup_candles;
         root["feature_rows"] = result.feature_rows;
@@ -316,6 +328,7 @@ namespace
     {
         py::dict dict;
         dict["ticks_path"] = cfg.ticks_path;
+        dict["symbol"] = cfg.symbol;
         dict["timeframe"] = timeframe_to_str(cfg.timeframe);
         dict["train_ratio"] = cfg.train_ratio;
         dict["ridge_lambda"] = cfg.ridge_lambda;

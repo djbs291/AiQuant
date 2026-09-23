@@ -503,6 +503,11 @@ namespace fin::app
                 }
                 cfg.online_update = *b;
             }
+            else if (lowered == "symbol")
+            {
+                // Case-sensitive, unlike the keys: ticker symbols are not ours to fold.
+                cfg.symbol = value;
+            }
             else
             {
                 // Silence used to be the policy here, which meant a typo trained a different

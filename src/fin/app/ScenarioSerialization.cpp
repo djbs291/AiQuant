@@ -50,6 +50,10 @@ namespace fin::app
         std::ostringstream out;
         out << "{\n";
         out << "  \"ticks_path\": " << std::quoted(cfg.ticks_path) << ",\n";
+        // The instrument the run resolved to, and how many ticks belonged to another one and
+        // were left out rather than blended into these candles.
+        out << "  \"symbol\": " << std::quoted(result.symbol) << ",\n";
+        out << "  \"ticks_other_symbol\": " << result.ticks_other_symbol << ",\n";
         out << "  \"timeframe\": \"" << timeframe_to_cstr(cfg.timeframe) << "\",\n";
         out << "  \"candles\": " << result.candles << ",\n";
         out << "  \"warmup_candles\": " << result.warmup_candles << ",\n";
