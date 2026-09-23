@@ -136,9 +136,10 @@ TEST_CASE("Randomized scenario files never break the loader's guarantees",
         "14", "0", "1", "-1", "3", "18446744073709551616", "0.7", "2.5", "-0.5", "1e-3",
         "nan", "-nan", "inf", "-inf", "infinity", "1e400", "1e-400", "5abc", "", " 3 ", "+5",
         "0x10", "true", "off", "maybe", "M5", "X9", "sgd", "ridge", "close,rsi,atr",
-        "close,,rsi", "close,close", "bogus_feature", "150", "data.csv", "ABC"};
+        "close,,rsi", "close,close", "bogus_feature", "150", "data.csv", "ABC", "runs#3.csv",
+        "10#x", "#"};
     const std::vector<std::string> separators = {" = ", "=", "==", " "};
-    const std::vector<std::string> suffixes = {"", "", "", " # trailing comment", "\r"};
+    const std::vector<std::string> suffixes = {"", "", "", " # trailing comment", "#glued", "\r"};
 
     std::size_t accepted = 0;
     std::size_t refused = 0;
