@@ -635,7 +635,7 @@ static int cmd_stream(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant stream <ticks.csv> [--tf S1|S5|M1|M5|H1] [--model-linear path] [--features a,b,c] [--symbol SYM] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--all] [--limit N]\n";
+        std::cerr << "Usage: aiquant stream <ticks.csv> [--tf S1|S5|M1|M5|H1] [--model-linear path] [--features a,b,c] [--symbol SYM | --per-symbol] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--all] [--limit N]\n";
         return 2;
     }
 
@@ -663,12 +663,24 @@ static int cmd_stream(const std::vector<std::string> &args)
         cfg.signal.rsi_sell_above = *v;
     cfg.signal.use_ema_crossover = !flag_present(args, "--no-ema-xover");
 
+    const bool per_symbol = flag_present(args, "--per-symbol");
     if (auto symbol = parse_string_flag(args, "--symbol"))
     {
+        if (per_symbol)
+        {
+            std::cerr << "--symbol and --per-symbol ask for one instrument and for all of them; pick one\n";
+            return 2;
+        }
         // Naming a symbol is how you say "this file holds several; take mine and skip the
         // rest". Without it, a second symbol is an error rather than a silent blend.
         cfg.symbol = *symbol;
         cfg.foreign_symbol = fin::stream::SymbolPolicy::Skip;
+    }
+    else if (per_symbol)
+    {
+        // Every instrument in the file gets its own candles, indicators and signals, all
+        // judged by the one model. The CSV rows carry the symbol, so they stay attributable.
+        cfg.foreign_symbol = fin::stream::SymbolPolicy::Route;
     }
 
     cfg.features = parse_feature_list(args);
@@ -723,7 +735,21 @@ static int cmd_stream(const std::vector<std::string> &args)
     std::cerr << "Ticks: " << read.parsed << " parsed, " << read.skipped << " unparsable, "
               << stats.ticks_out_of_order << " out of order, "
               << stats.ticks_other_symbol << " other symbol\n";
-    std::cerr << "Symbol: " << engine.bound_symbol() << "\n";
+    if (per_symbol)
+    {
+        const auto by_symbol = engine.stats_by_symbol();
+        std::cerr << "Symbols: " << by_symbol.size() << "\n";
+        for (const auto &[symbol, s] : by_symbol)
+        {
+            std::cerr << "  " << symbol << ": " << s.ticks << " ticks, " << s.candles
+                      << " candles, " << s.feature_rows << " feature rows, signals Buy " << s.buys
+                      << " / Sell " << s.sells << " / Hold " << s.holds << "\n";
+        }
+    }
+    else
+    {
+        std::cerr << "Symbol: " << engine.bound_symbol() << "\n";
+    }
     std::cerr << "Candles: " << stats.candles << ", feature rows: " << stats.feature_rows
               << ", predictions: " << stats.predictions;
     if (stats.prediction_errors > 0)
