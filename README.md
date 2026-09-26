@@ -83,16 +83,35 @@ both, rather than blended into a single candle series. Two flags change that:
 
 - `--symbol ABC` says "this file has several, take mine and count the rest as skipped".
 - `--per-symbol` gives every symbol its own pipeline: its own candles, indicators, warmup and
-  signals, with the symbol in each CSV row and a per-symbol breakdown in the summary. All
-  symbols are judged by the one model passed with `--model-linear`, so a model trained on one
+  signals, with the symbol in each CSV row and a per-symbol breakdown in the summary.
+
+With `--per-symbol`, the model can be shared or per symbol:
+
+- `--model-linear model.csv` scores every symbol with one model, so a model trained on one
   instrument is being applied to the others.
+- `--model-dir models/` gives each symbol its own model, read from `models/<SYMBOL>.csv`. Each
+  pipeline computes the feature set its own model was trained on, so models trained on different
+  features can sit in one directory. A symbol with no file there still streams, without
+  predictions, and is marked `(no model)` in the summary.
+
+Train the directory with one `run-mvp` per symbol:
 
 ```bash
-./build/aiquant stream ticks.csv --model-linear model.csv --per-symbol
+mkdir -p models
+for s in ABC XYZ; do
+  ./build/aiquant run-mvp ticks.csv --symbol "$s" --model-out "models/$s.csv"
+done
+./build/aiquant stream ticks.csv --per-symbol --model-dir models
 ```
 
+A model file records the symbol it was trained on (`# symbol: ABC`), and the directory is refused
+at startup if a file's recorded symbol differs from its name, so ABC's model copied to
+`XYZ.csv` never scores XYZ. Every file is loaded before the first tick.
+
 Threads, queues and SIMD are not here yet: the pipelines run one after another on the calling
-thread, in tick order. `StreamEngine` does the routing, `SymbolPipeline` holds one symbol's
+thread, in tick order. That is a measured choice, not only a missing feature: on 1M ticks over 4
+symbols (Release, M1) the whole stream takes about as long as reading and resampling the CSV
+alone, so the pipelines are not where the time goes. `StreamEngine` does the routing, `SymbolPipeline` holds one symbol's
 state and stages, and `ISignalSink` is where a queue will slot in.
 
 ## C++ / Python API
