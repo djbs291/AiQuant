@@ -16,14 +16,16 @@ namespace fin::stream
     enum class SymbolPolicy
     {
         Reject, // throw: a mixed file is a mistake unless the caller says otherwise
-        Skip    // drop and count it: the caller asked for one symbol out of many
+        Skip,   // drop and count it: the caller asked for one symbol out of many
+        Route   // bind to no symbol: each one gets its own pipeline, and none is dropped
     };
 
     struct StreamConfig
     {
         fin::io::Timeframe timeframe = fin::io::Timeframe::M1;
 
-        // Empty binds the stream to the first tick's symbol.
+        // Empty binds the stream to the first tick's symbol. Must be empty under Route, which
+        // binds to none.
         std::string symbol;
         SymbolPolicy foreign_symbol = SymbolPolicy::Reject;
 
@@ -38,8 +40,8 @@ namespace fin::stream
         fin::signal::SignalEngineConfig signal{};
     };
 
-    // Plain counters, deliberately without logic: when workers arrive they will be summed
-    // across pipelines rather than shared.
+    // Plain counters, deliberately without logic: under Route each pipeline keeps its own and
+    // StreamEngine::stats() sums them, so nothing is shared between pipelines.
     struct StreamStats
     {
         std::size_t ticks = 0;

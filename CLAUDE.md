@@ -33,9 +33,10 @@ cmake -S . -B /tmp/aiquant-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFETCHCONTENT
 cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-on-failure
 
 # Live pipeline: ticks -> candles -> indicators -> model -> signals, one CSV row per signal on
-# stdout and the summary on stderr. Single-symbol: a file with a second symbol is refused
-# unless --symbol names one. --features defaults to the set recorded in the model file.
-./build/aiquant stream ticks.csv --tf M1 --model-linear model.csv [--symbol ABC] [--all] [--limit N]
+# stdout and the summary on stderr. A file with a second symbol is refused unless --symbol names
+# one, or --per-symbol gives each its own pipeline (one shared model). --features defaults to
+# the set recorded in the model file.
+./build/aiquant stream ticks.csv --tf M1 --model-linear model.csv [--symbol ABC | --per-symbol] [--all] [--limit N]
 
 # CLI (subcommands: features, backtest, train-linear, run-mvp, run-config, stream; run without args for usage)
 # With --json, stdout is JSON only and the human report goes to stderr, so it pipes into jq.
@@ -81,7 +82,8 @@ fin_core (Timestamp, Price, Volume, Symbol, Tick, Candle, RingBuffer)
  └─ fin_signal    (IndicatorsSnapshot -> SignalEngine -> Signal)
 fin_backtest (Backtester: long-only, cash/qty/fee, drawdown)   -> core, indicators, signal
 fin_ml       (FeatureVector, IModel, LinearModel, LinearTrainer, SgdRegressor) -> core, indicators
-fin_stream   (StreamEngine routes, SymbolPipeline runs the stages, ISignalSink dispatches)
+fin_stream   (StreamEngine routes ticks to one SymbolPipeline per symbol, which runs the
+             stages; ISignalSink dispatches)
              -> io, indicators, ml, signal   [the live path; never depends on fin_backtest]
 fin_app      (ScenarioConfig INI IO, ScenarioRunner, JSON serialization) -> all of the above
 fin_api      (fin::api::ScenarioService: run / run_file / load_file) -> fin_app

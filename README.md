@@ -78,13 +78,22 @@ One CSV row per signal on stdout (so it pipes), the summary on stderr. `--all` i
 bars, `--limit N` stops printing after N rows. Without `--features` the set recorded in the
 model file is used, so a model is never applied to a feature set it was not trained on.
 
-A stream carries **one symbol**. A file holding a second one is refused, naming both, rather
-than blended into a single candle series — which is what the batch path still does silently.
-`--symbol ABC` says "this file has several, take mine and count the rest as skipped".
+By default a stream carries **one symbol**. A file holding a second one is refused, naming
+both, rather than blended into a single candle series. Two flags change that:
 
-Threads, queues and SIMD are not here yet: this is the single-threaded skeleton the rest of the
-streaming roadmap builds on. `StreamEngine` does the routing, `SymbolPipeline` holds one
-symbol's state and stages, and `ISignalSink` is where a queue will slot in.
+- `--symbol ABC` says "this file has several, take mine and count the rest as skipped".
+- `--per-symbol` gives every symbol its own pipeline: its own candles, indicators, warmup and
+  signals, with the symbol in each CSV row and a per-symbol breakdown in the summary. All
+  symbols are judged by the one model passed with `--model-linear`, so a model trained on one
+  instrument is being applied to the others.
+
+```bash
+./build/aiquant stream ticks.csv --model-linear model.csv --per-symbol
+```
+
+Threads, queues and SIMD are not here yet: the pipelines run one after another on the calling
+thread, in tick order. `StreamEngine` does the routing, `SymbolPipeline` holds one symbol's
+state and stages, and `ISignalSink` is where a queue will slot in.
 
 ## C++ / Python API
 
