@@ -31,6 +31,9 @@ namespace
     struct Options
     {
         int port = 8080;
+        // Loopback unless told otherwise. The service has no TLS and no authentication, so
+        // listening on every interface has to be a decision someone makes, not a default.
+        std::string bind = "127.0.0.1";
         // /run-file only opens scenarios under this directory.
         std::filesystem::path root = std::filesystem::current_path();
         std::size_t max_body = 1024 * 1024; // 1 MiB
@@ -253,34 +256,140 @@ namespace
         Missing
     };
 
-    // Resolves a requested file (a scenario, or a model) against the configured root and
-    // refuses anything that escapes it, so the service cannot be used to read arbitrary files
-    // off the host.
-    PathStatus resolve_under_root(const std::filesystem::path &root, const std::string &raw,
-                                  std::filesystem::path &resolved)
+    // `requested` made absolute against `base` and canonicalized. Symlinks in the part of the
+    // path that exists are resolved, so a link pointing out of the root lands outside it.
+    std::filesystem::path absolute_from(const std::filesystem::path &base, const std::string &requested)
+    {
+        std::filesystem::path candidate(requested);
+        if (candidate.is_relative())
+            candidate = base / candidate;
+
+        std::error_code ec;
+        auto canonical = std::filesystem::weakly_canonical(candidate, ec);
+        return ec ? candidate.lexically_normal() : canonical;
+    }
+
+    bool is_inside(const std::filesystem::path &root, const std::filesystem::path &candidate)
+    {
+        const auto relative = candidate.lexically_relative(root);
+        return !relative.empty() && *relative.begin() != "..";
+    }
+
+    // Resolves a requested file (a scenario, a model, or a scenario's tick file) against `base`
+    // and refuses anything that escapes the root, so the service cannot be used to read
+    // arbitrary files off the host. Request bodies and model names resolve against the root
+    // itself; paths written inside a scenario resolve against the working directory, as they
+    // do on the CLI, and are then held to the same root.
+    PathStatus resolve_under_root(const std::filesystem::path &root, const std::filesystem::path &base,
+                                  const std::string &raw, std::filesystem::path &resolved)
     {
         const auto requested = trim(raw);
         if (requested.empty())
             return PathStatus::Empty;
 
-        std::error_code ec;
-        std::filesystem::path candidate(requested);
-        if (candidate.is_relative())
-            candidate = root / candidate;
-
-        candidate = std::filesystem::weakly_canonical(candidate, ec);
-        if (ec)
-            candidate = candidate.lexically_normal();
-
-        const auto relative = candidate.lexically_relative(root);
-        if (relative.empty() || *relative.begin() == "..")
+        const auto candidate = absolute_from(base, requested);
+        if (!is_inside(root, candidate))
             return PathStatus::Outside;
 
+        std::error_code ec;
         if (!std::filesystem::is_regular_file(candidate, ec))
             return PathStatus::Missing;
 
         resolved = candidate;
         return PathStatus::Ok;
+    }
+
+    PathStatus resolve_under_root(const std::filesystem::path &root, const std::string &raw,
+                                  std::filesystem::path &resolved)
+    {
+        return resolve_under_root(root, root, raw, resolved);
+    }
+
+    // The same containment for a file the service is about to write (a scenario's model_out),
+    // which need not exist yet. Missing means the directory it would go in does not exist.
+    //
+    // A symlink as the file itself is refused outright, wherever it points. weakly_canonical
+    // cannot see through a dangling one -- it only resolves what exists -- so a link inside the
+    // root to a file not yet created outside it would pass every other check here, and the
+    // write would follow it out.
+    PathStatus resolve_output_under_root(const std::filesystem::path &root, const std::filesystem::path &base,
+                                         const std::string &raw, std::filesystem::path &resolved)
+    {
+        const auto requested = trim(raw);
+        if (requested.empty())
+            return PathStatus::Empty;
+
+        std::filesystem::path candidate(requested);
+        if (candidate.is_relative())
+            candidate = base / candidate;
+        candidate = candidate.lexically_normal();
+
+        const auto name = candidate.filename();
+        if (name.empty() || name == "." || name == "..")
+            return PathStatus::Outside;
+
+        const auto directory = absolute_from(base, candidate.parent_path().string());
+        const auto target = directory / name;
+        if (!is_inside(root, target))
+            return PathStatus::Outside;
+
+        std::error_code ec;
+        if (std::filesystem::is_symlink(std::filesystem::symlink_status(target, ec)))
+            return PathStatus::Outside;
+        if (!std::filesystem::is_directory(directory, ec))
+            return PathStatus::Missing;
+        if (std::filesystem::exists(target, ec) && !std::filesystem::is_regular_file(target, ec))
+            return PathStatus::Outside; // a directory, a socket, a device: not ours to overwrite
+
+        resolved = target;
+        return PathStatus::Ok;
+    }
+
+    // Holds a loaded scenario to the root before it runs: its tick file has to be inside it,
+    // and so does any model_out. On success `pinned` is `cfg` with both paths replaced by the
+    // absolute ones just checked, so the run opens exactly what was verified. The response is
+    // still built from `cfg`, which keeps the server's own layout out of the JSON.
+    bool confine_scenario(int client, const Options &opts, const fin::app::ScenarioConfig &cfg,
+                          fin::app::ScenarioConfig &pinned)
+    {
+        const auto cwd = std::filesystem::current_path();
+        pinned = cfg;
+
+        std::filesystem::path ticks;
+        switch (resolve_under_root(opts.root, cwd, cfg.ticks_path, ticks))
+        {
+        case PathStatus::Empty: // the loader already requires a ticks path
+        case PathStatus::Outside:
+            send_response(client, 403, "Forbidden",
+                          json_error("Ticks path is outside the configured root directory"));
+            return false;
+        case PathStatus::Missing:
+            send_response(client, 404, "Not Found", json_error("Ticks file not found"));
+            return false;
+        case PathStatus::Ok:
+            pinned.ticks_path = ticks.string();
+            break;
+        }
+
+        if (cfg.model_output_path)
+        {
+            std::filesystem::path output;
+            switch (resolve_output_under_root(opts.root, cwd, *cfg.model_output_path, output))
+            {
+            case PathStatus::Empty:
+            case PathStatus::Outside:
+                send_response(client, 403, "Forbidden",
+                              json_error("model_out is outside the configured root directory"));
+                return false;
+            case PathStatus::Missing:
+                send_response(client, 404, "Not Found", json_error("Directory for model_out not found"));
+                return false;
+            case PathStatus::Ok:
+                pinned.model_output_path = output.string();
+                break;
+            }
+        }
+        return true;
     }
 
     // ---- static files, served only when --static is given ----------------------------------
@@ -743,7 +852,11 @@ namespace
                     return;
                 }
 
-                const auto result = service.run(cfg);
+                fin::app::ScenarioConfig pinned{};
+                if (!confine_scenario(client, opts, cfg, pinned))
+                    return;
+
+                const auto result = service.run(pinned);
                 send_response(client, 200, "OK", fin::app::scenario_result_to_json(cfg, result));
             }
             else if (req.path == "/run-config")
@@ -766,7 +879,11 @@ namespace
                     return;
                 }
 
-                const auto result = service.run(cfg);
+                fin::app::ScenarioConfig pinned{};
+                if (!confine_scenario(client, opts, cfg, pinned))
+                    return;
+
+                const auto result = service.run(pinned);
                 send_response(client, 200, "OK", fin::app::scenario_result_to_json(cfg, result));
             }
             else if (req.path == "/predict")
@@ -800,9 +917,10 @@ namespace
 
     void print_usage()
     {
-        std::cerr << "Usage: aiquant_http [--port N] [--root DIR] [--model FILE] [--static DIR]"
+        std::cerr << "Usage: aiquant_http [--port N] [--bind ADDR] [--root DIR] [--model FILE] [--static DIR]"
                      " [--max-body BYTES] [--max-connections N]\n"
-                  << "  --root             directory /run-file and model paths resolve under (default: cwd)\n"
+                  << "  --bind             IPv4 address to listen on (default: 127.0.0.1; 0.0.0.0 for every interface)\n"
+                  << "  --root             directory every file the service reads or writes must be under (default: cwd)\n"
                   << "  --model            default model for /predict and /signal\n"
                   << "  --static           directory served over GET (default: off)\n"
                   << "  --max-body         maximum request body in bytes (default: 1048576)\n"
@@ -828,6 +946,16 @@ namespace
             {
                 if (arg == "--port")
                     opts.port = std::stoi(value);
+                else if (arg == "--bind")
+                {
+                    in_addr parsed{};
+                    if (::inet_pton(AF_INET, value.c_str(), &parsed) != 1)
+                    {
+                        std::cerr << "Invalid value for --bind (expected an IPv4 address): " << value << "\n";
+                        return false;
+                    }
+                    opts.bind = value;
+                }
                 else if (arg == "--root")
                     opts.root = value;
                 else if (arg == "--model")
@@ -916,7 +1044,7 @@ int main(int argc, char **argv)
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    ::inet_pton(AF_INET, opts.bind.c_str(), &addr.sin_addr); // validated in parse_args
     addr.sin_port = htons(static_cast<uint16_t>(opts.port));
 
     if (bind(server_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0)
@@ -933,7 +1061,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    std::cout << "AiQuant HTTP service listening on port " << opts.port << "\n"
+    std::cout << "AiQuant HTTP service listening on " << opts.bind << ":" << opts.port << "\n"
               << "  scenario root: " << opts.root << "\n"
               << "  max body: " << opts.max_body << " bytes, max concurrent requests: "
               << opts.max_connections << std::endl;
