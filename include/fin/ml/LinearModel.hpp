@@ -2,8 +2,10 @@
 #ifndef FIN_ML_LINEAR_MODEL_HPP
 #define FIN_ML_LINEAR_MODEL_HPP
 
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -55,13 +57,30 @@ namespace fin::ml
         // Feature order recorded by the model file, empty for files written before it existed.
         [[nodiscard]] const std::vector<std::string> &feature_names() const noexcept { return feature_names_; }
 
+        // The instrument the model was trained on, from a "# symbol:" line; empty for files
+        // written before it existed, or trained on a file whose symbol nobody resolved.
+        [[nodiscard]] const std::string &symbol() const noexcept { return symbol_; }
+        void set_symbol(std::string symbol) { symbol_ = std::move(symbol); }
+
     private:
         double bias_ = 0.0;
         std::vector<double> weights_{};
         std::vector<std::pair<std::string, double>> named_weights_{};
         std::vector<std::string> feature_names_{};
+        std::string symbol_{};
         bool ready_ = false;
     };
+
+    // Loads every `*.csv` in `dir` as one symbol's model, keyed on the file name without its
+    // extension (`models/ABC.csv` -> "ABC"). Everything is loaded up front, so a bad file fails
+    // at startup rather than mid-feed, and no path is ever built from a symbol a feed supplied.
+    // Refuses, naming the file: one that does not load, and one whose recorded symbol differs
+    // from its name -- a model trained on ABC saved as XYZ.csv is the very mistake per-symbol
+    // models exist to prevent. Also refuses a missing directory or one with no model in it.
+    // Dotfiles and other extensions are ignored. On failure `out` is left untouched.
+    bool load_linear_model_dir(const std::string &dir,
+                               std::unordered_map<std::string, std::shared_ptr<LinearModel>> &out,
+                               std::string &error);
 }
 
 #endif // FIN_ML_LINEAR_MODEL_HPP

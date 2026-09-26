@@ -1,5 +1,7 @@
 #pragma once
 
+#include "catch2_compat.hpp"
+
 #include <chrono>
 #include <optional>
 #include <string>
@@ -70,4 +72,35 @@ namespace stream_test
 
         std::vector<Recorded> events;
     };
+
+    inline std::vector<Recorded> events_for(const std::vector<Recorded> &events, const std::string &symbol)
+    {
+        std::vector<Recorded> out;
+        for (const auto &event : events)
+        {
+            if (event.symbol == symbol)
+                out.push_back(event);
+        }
+        return out;
+    }
+
+    // Exact equality on purpose, predictions included: both runs do the same arithmetic in
+    // the same order, so any difference at all means state leaked between pipelines.
+    inline void require_same_events(const std::vector<Recorded> &a, const std::vector<Recorded> &b)
+    {
+        REQUIRE(a.size() == b.size());
+        for (std::size_t i = 0; i < a.size(); ++i)
+        {
+            REQUIRE(a[i].ts_ms == b[i].ts_ms);
+            REQUIRE(a[i].candle.open().value() == b[i].candle.open().value());
+            REQUIRE(a[i].candle.high().value() == b[i].candle.high().value());
+            REQUIRE(a[i].candle.low().value() == b[i].candle.low().value());
+            REQUIRE(a[i].candle.close().value() == b[i].candle.close().value());
+            REQUIRE(a[i].candle.volume().value() == b[i].candle.volume().value());
+            REQUIRE(a[i].has_row == b[i].has_row);
+            REQUIRE(a[i].prediction == b[i].prediction);
+            REQUIRE(a[i].type == b[i].type);
+            REQUIRE(a[i].partial == b[i].partial);
+        }
+    }
 }

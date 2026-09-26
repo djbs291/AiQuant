@@ -34,9 +34,10 @@ cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-o
 
 # Live pipeline: ticks -> candles -> indicators -> model -> signals, one CSV row per signal on
 # stdout and the summary on stderr. A file with a second symbol is refused unless --symbol names
-# one, or --per-symbol gives each its own pipeline (one shared model). --features defaults to
-# the set recorded in the model file.
+# one, or --per-symbol gives each its own pipeline. --features defaults to the set recorded in
+# the model file; with --model-dir each symbol gets models/<SYMBOL>.csv and its own feature set.
 ./build/aiquant stream ticks.csv --tf M1 --model-linear model.csv [--symbol ABC | --per-symbol] [--all] [--limit N]
+./build/aiquant stream ticks.csv --per-symbol --model-dir models   # models/ABC.csv, models/XYZ.csv, ...
 
 # CLI (subcommands: features, backtest, train-linear, run-mvp, run-config, stream; run without args for usage)
 # With --json, stdout is JSON only and the human report goes to stderr, so it pipes into jq.

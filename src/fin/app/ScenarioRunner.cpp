@@ -304,6 +304,9 @@ namespace fin::app
                                          "]; try a larger ridge or fewer correlated features)");
             }
         }
+        // Carried by the model, and so written into any file it is saved to: a per-symbol model
+        // directory can then tell a model stored under the wrong symbol's name.
+        training_summary.model.set_symbol(result.symbol);
         result.training = training_summary;
 
         double sse = 0.0;
