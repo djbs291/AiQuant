@@ -63,4 +63,38 @@ namespace test_files
     private:
         std::filesystem::path path_;
     };
+
+    // A fresh directory in the system temp dir, removed with everything in it on scope exit.
+    class TempDir
+    {
+    public:
+        explicit TempDir(std::string_view prefix) : path_(temp_path(prefix, ""))
+        {
+            std::filesystem::create_directories(path_);
+        }
+
+        ~TempDir()
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(path_, ec);
+        }
+
+        TempDir(const TempDir &) = delete;
+        TempDir &operator=(const TempDir &) = delete;
+
+        const std::filesystem::path &path() const { return path_; }
+        std::string string() const { return path_.string(); }
+
+        // Writes `contents` to `name` inside the directory and returns its path.
+        std::filesystem::path write(std::string_view name, std::string_view contents) const
+        {
+            const auto file = path_ / std::string(name);
+            std::ofstream out(file);
+            out << contents;
+            return file;
+        }
+
+    private:
+        std::filesystem::path path_;
+    };
 }

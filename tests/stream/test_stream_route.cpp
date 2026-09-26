@@ -20,7 +20,9 @@ using fin::stream::StreamConfig;
 using fin::stream::StreamEngine;
 using fin::stream::SymbolPolicy;
 using stream_test::make_tick;
+using stream_test::events_for;
 using stream_test::Recorded;
+using stream_test::require_same_events;
 using stream_test::RecordingSink;
 
 namespace
@@ -38,37 +40,6 @@ namespace
         cfg.symbol = symbol;
         cfg.foreign_symbol = SymbolPolicy::Skip;
         return cfg;
-    }
-
-    std::vector<Recorded> events_for(const std::vector<Recorded> &events, const std::string &symbol)
-    {
-        std::vector<Recorded> out;
-        for (const auto &event : events)
-        {
-            if (event.symbol == symbol)
-                out.push_back(event);
-        }
-        return out;
-    }
-
-    // Exact equality on purpose, predictions included: both runs do the same arithmetic in
-    // the same order, so any difference at all means state leaked between pipelines.
-    void require_same_events(const std::vector<Recorded> &a, const std::vector<Recorded> &b)
-    {
-        REQUIRE(a.size() == b.size());
-        for (std::size_t i = 0; i < a.size(); ++i)
-        {
-            REQUIRE(a[i].ts_ms == b[i].ts_ms);
-            REQUIRE(a[i].candle.open().value() == b[i].candle.open().value());
-            REQUIRE(a[i].candle.high().value() == b[i].candle.high().value());
-            REQUIRE(a[i].candle.low().value() == b[i].candle.low().value());
-            REQUIRE(a[i].candle.close().value() == b[i].candle.close().value());
-            REQUIRE(a[i].candle.volume().value() == b[i].candle.volume().value());
-            REQUIRE(a[i].has_row == b[i].has_row);
-            REQUIRE(a[i].prediction == b[i].prediction);
-            REQUIRE(a[i].type == b[i].type);
-            REQUIRE(a[i].partial == b[i].partial);
-        }
     }
 
     // A model trained by the batch path on ABC alone, taken in memory for the reason given in

@@ -9,6 +9,7 @@
 #include "fin/app/ScenarioConfigIO.hpp"
 #include "fin/app/ScenarioRunner.hpp"
 #include "fin/app/ScenarioSerialization.hpp"
+#include "fin/ml/LinearModel.hpp"
 
 TEST_CASE("Scenario INI carries a symbol, case intact", "[app][symbol]")
 {
@@ -103,6 +104,34 @@ TEST_CASE("The two symbols in one file produce different scenarios", "[app][symb
     // the weights do not.
     REQUIRE_FALSE(abc_result.training.model.bias() ==
                   Approx(xyz_result.training.model.bias()).margin(1e-9));
+
+    std::filesystem::remove(ticks);
+}
+
+TEST_CASE("A saved model records the symbol the scenario resolved", "[app][symbol]")
+{
+    // So that `run-mvp --symbol X --model-out models/X.csv` writes a file that says which
+    // instrument it belongs to, and a model directory can refuse one saved under a wrong name.
+    const auto ticks = scenario_test::write_two_symbol_ticks();
+    const test_files::TempDir dir("aiquant_scenario_models_");
+
+    fin::app::ScenarioConfig cfg{};
+    cfg.ticks_path = ticks.string();
+    cfg.symbol = "XYZ";
+    cfg.model_output_path = (dir.path() / "XYZ.csv").string();
+    const auto result = fin::app::run_scenario(cfg);
+    REQUIRE(result.model_saved);
+    REQUIRE(result.training.model.symbol() == "XYZ");
+
+    fin::ml::LinearModel loaded;
+    REQUIRE(loaded.load_from_file(*cfg.model_output_path));
+    REQUIRE(loaded.symbol() == "XYZ");
+
+    // Without a symbol key the run binds to the first tick's symbol, and that is recorded.
+    fin::app::ScenarioConfig unnamed{};
+    unnamed.ticks_path = ticks.string();
+    unnamed.model_output_path = (dir.path() / "first.csv").string();
+    REQUIRE(fin::app::run_scenario(unnamed).training.model.symbol() == "ABC");
 
     std::filesystem::remove(ticks);
 }
