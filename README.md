@@ -162,10 +162,15 @@ Every field is optional. Supply `prediction` to evaluate the rules against a num
 
 `POST /run-file` takes a path to a scenario file; it is resolved against `--root` (default: the working directory) and anything outside that directory is refused. `POST /run-config` accepts raw INI contents and executes them via a temporary file. Both return the JSON emitted by the CLI `--json` flag.
 
+The files a scenario names are held to `--root` too, on both endpoints: its `ticks` file (`403` outside the root, `404` if missing) and any `model_out` (`403` outside, `404` if the directory does not exist). Relative paths inside a scenario resolve against the server's **working directory**, exactly as they do on the CLI, and are then checked against the root — so `scenarios/mvp.ini`, whose `ticks = scenarios/ticks_mvp.csv`, runs with `--root scenarios` from the repository root. A `model_out` that is itself a symlink is refused wherever it points. Writing a model inside the root is allowed, so a model trained through `/run-config` can be served by `/predict`.
+
+The service listens on **`127.0.0.1` by default**. It has no TLS and no authentication, so exposing it is a decision to make explicitly with `--bind 0.0.0.0` (or a specific address), preferably behind a proxy that adds both. Before 2026-09-27 it listened on every interface.
+
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--port` | 8080 | TCP port |
-| `--root` | working directory | directory `/run-file` and request-supplied model paths resolve under |
+| `--bind` | 127.0.0.1 | IPv4 address to listen on; `0.0.0.0` for every interface |
+| `--root` | working directory | directory every file the service reads or writes must be under: `/run-file` scenarios, models, and the `ticks` and `model_out` a scenario names |
 | `--model` | none | default model for `/predict` and `/signal` |
 | `--static` | off | directory served over `GET`; without it the service stays POST-only |
 | `--max-body` | 1048576 | maximum request body in bytes |

@@ -46,9 +46,12 @@ cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-o
 ./build/aiquant backtest ticks.csv --model-linear model.csv
 
 # HTTP: GET /health; POST /run-file (body = INI path under --root), POST /run-config (raw INI),
-# and POST /predict + /signal, which take JSON (see README). --root defaults to the cwd.
+# and POST /predict + /signal, which take JSON (see README). --root defaults to the cwd, and
+# every file the service touches must be under it, including a scenario's ticks and model_out
+# (those resolve against the cwd, as on the CLI, then get checked). Listens on 127.0.0.1
+# unless --bind says otherwise: there is no TLS and no auth.
 ./build/aiquant_http --port 8080 --root scenarios --model model.csv [--static examples/dashboard] \
-  [--max-body 1048576] [--max-connections 32]
+  [--bind 127.0.0.1] [--max-body 1048576] [--max-connections 32]
 # --static is off unless given; it serves GET from that directory only (whitelisted extensions,
 # no dotfiles, no listings, symlinks out refused) and never shadows an API route.
 python3 tests/http/smoke_test.py   # endpoint + status-code smoke test, also run by ci.yml (not by ctest)
