@@ -33,7 +33,15 @@ namespace fin::stream
     StreamEngine::StreamEngine(StreamConfig config,
                                std::shared_ptr<fin::ml::IModel> model,
                                ISignalSink *sink)
-        : config_(std::move(config)), model_(std::move(model)), sink_(sink)
+        : StreamEngine(std::move(config),
+                       ModelResolver{[model = std::move(model)](const std::string &)
+                                     { return SymbolModel{model, {}}; }},
+                       sink)
+    {
+    }
+
+    StreamEngine::StreamEngine(StreamConfig config, ModelResolver resolver, ISignalSink *sink)
+        : config_(std::move(config)), resolver_(std::move(resolver)), sink_(sink)
     {
         if (config_.foreign_symbol == SymbolPolicy::Route && !config_.symbol.empty())
         {
@@ -53,7 +61,24 @@ namespace fin::stream
         auto it = pipelines_.find(symbol);
         if (it == pipelines_.end())
         {
-            it = pipelines_.try_emplace(symbol, symbol, config_, model_, sink_).first;
+            SymbolModel resolved = resolver_.resolve ? resolver_.resolve(symbol) : SymbolModel{};
+
+            // The pipeline computes the features its own model was trained on. The copy is
+            // cheap next to a pipeline and only happens once per symbol; SymbolPipeline reads
+            // the config in its constructor and keeps nothing of it.
+            StreamConfig pipeline_config = config_;
+            if (!resolved.features.empty())
+            {
+                if (!config_.features.empty() && config_.features != resolved.features)
+                {
+                    throw std::invalid_argument(
+                        "the model for symbol '" + symbol +
+                        "' was trained on a different feature set than the one configured");
+                }
+                pipeline_config.features = resolved.features;
+            }
+
+            it = pipelines_.try_emplace(symbol, symbol, pipeline_config, std::move(resolved.model), sink_).first;
             order_.push_back(symbol);
         }
         last_ = &it->second;
@@ -93,6 +118,12 @@ namespace fin::stream
         }
 
         pipeline_for(bound_symbol_).on_tick(tick);
+    }
+
+    bool StreamEngine::has_model(const std::string &symbol) const
+    {
+        const auto it = pipelines_.find(symbol);
+        return it != pipelines_.end() && it->second.has_model();
     }
 
     void StreamEngine::flush()

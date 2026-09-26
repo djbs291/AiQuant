@@ -12,6 +12,7 @@
 #include <chrono>
 #include <exception>
 #include <memory>
+#include <unordered_map>
 
 #include "fin/io/Pipeline.hpp"
 #include "fin/backtest/Backtester.hpp"
@@ -635,7 +636,7 @@ static int cmd_stream(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant stream <ticks.csv> [--tf S1|S5|M1|M5|H1] [--model-linear path] [--features a,b,c] [--symbol SYM | --per-symbol] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--all] [--limit N]\n";
+        std::cerr << "Usage: aiquant stream <ticks.csv> [--tf S1|S5|M1|M5|H1] [--model-linear path] [--features a,b,c] [--symbol SYM | --per-symbol [--model-dir DIR]] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--all] [--limit N]\n";
         return 2;
     }
 
@@ -685,6 +686,45 @@ static int cmd_stream(const std::vector<std::string> &args)
 
     cfg.features = parse_feature_list(args);
 
+    const auto model_dir = parse_string_flag(args, "--model-dir");
+    if (model_dir && !per_symbol)
+    {
+        std::cerr << "--model-dir holds one model per symbol and needs --per-symbol\n";
+        return 2;
+    }
+    if (model_dir && parse_string_flag(args, "--model-linear"))
+    {
+        std::cerr << "--model-dir and --model-linear both choose the model; pick one\n";
+        return 2;
+    }
+
+    // One model per symbol, all loaded before the first tick: a bad file fails here rather
+    // than mid-feed, and no path is ever built from a symbol the feed supplied.
+    std::unordered_map<std::string, std::shared_ptr<fin::ml::LinearModel>> models;
+    if (model_dir)
+    {
+        std::string error;
+        if (!fin::ml::load_linear_model_dir(*model_dir, models, error))
+        {
+            std::cerr << error << "\n";
+            return 1;
+        }
+        // An explicit --features has to be the set every model was trained on; otherwise a
+        // model would be scored on a subset of its weights.
+        if (!cfg.features.empty())
+        {
+            for (const auto &[symbol, loaded] : models)
+            {
+                if (!loaded->feature_names().empty() && loaded->feature_names() != cfg.features)
+                {
+                    std::cerr << "--features differs from the set the model for " << symbol
+                              << " was trained on\n";
+                    return 1;
+                }
+            }
+        }
+    }
+
     std::shared_ptr<fin::ml::IModel> model;
     if (auto model_path = parse_string_flag(args, "--model-linear"))
     {
@@ -702,7 +742,17 @@ static int cmd_stream(const std::vector<std::string> &args)
     }
 
     CsvSignalSink sink(flag_present(args, "--all"), parse_size_flag(args, "--limit").value_or(0));
-    fin::stream::StreamEngine engine(cfg, model, &sink);
+    // Without --model-dir every symbol gets the one --model-linear model, as before.
+    fin::stream::ModelResolver resolver{[&](const std::string &symbol)
+                                        {
+                                            if (!model_dir)
+                                                return fin::stream::SymbolModel{model, {}};
+                                            const auto it = models.find(symbol);
+                                            if (it == models.end())
+                                                return fin::stream::SymbolModel{}; // no predictions
+                                            return fin::stream::SymbolModel{it->second, it->second->feature_names()};
+                                        }};
+    fin::stream::StreamEngine engine(cfg, std::move(resolver), &sink);
 
     fin::io::TickCsvOptions opt{};
     fin::io::FileTickSource source(path, opt);
@@ -739,11 +789,16 @@ static int cmd_stream(const std::vector<std::string> &args)
     {
         const auto by_symbol = engine.stats_by_symbol();
         std::cerr << "Symbols: " << by_symbol.size() << "\n";
+        if (model_dir)
+            std::cerr << "Models: " << models.size() << " loaded from " << *model_dir << "\n";
         for (const auto &[symbol, s] : by_symbol)
         {
             std::cerr << "  " << symbol << ": " << s.ticks << " ticks, " << s.candles
                       << " candles, " << s.feature_rows << " feature rows, signals Buy " << s.buys
-                      << " / Sell " << s.sells << " / Hold " << s.holds << "\n";
+                      << " / Sell " << s.sells << " / Hold " << s.holds;
+            if (!engine.has_model(symbol))
+                std::cerr << " (no model)";
+            std::cerr << "\n";
         }
     }
     else

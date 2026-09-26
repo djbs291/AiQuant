@@ -39,6 +39,7 @@ namespace fin::stream
 
         [[nodiscard]] const std::string &symbol() const noexcept { return symbol_; }
         [[nodiscard]] const StreamStats &stats() const noexcept { return stats_; }
+        [[nodiscard]] bool has_model() const noexcept { return model_ != nullptr; }
 
     private:
         void on_candle(const fin::core::Candle &candle, bool partial);

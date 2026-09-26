@@ -3,6 +3,7 @@
 #define FIN_STREAM_STREAM_ENGINE_HPP
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -18,6 +19,22 @@
 
 namespace fin::stream
 {
+    // What one symbol's pipeline predicts with. `features` is the set the model was trained
+    // on (LinearModel::feature_names()); empty means config.features, or the default set.
+    struct SymbolModel
+    {
+        std::shared_ptr<fin::ml::IModel> model;
+        std::vector<std::string> features;
+    };
+
+    // Called once per symbol, when its pipeline is created. Returning a null model is allowed:
+    // that symbol runs without predictions. A struct rather than a bare std::function alias
+    // on purpose: `StreamEngine(cfg, nullptr, &sink)` would otherwise match both constructors.
+    struct ModelResolver
+    {
+        std::function<SymbolModel(const std::string &symbol)> resolve;
+    };
+
     /**
      * @brief Routing and symbol policy. The stages live in SymbolPipeline.
      *
@@ -28,17 +45,27 @@ namespace fin::stream
      * Reject and Skip bind the stream to one symbol and keep exactly one pipeline. Route binds
      * to none: each symbol gets its own pipeline the first time it appears, with its own
      * candles, indicators, warmup and pending prediction, so two instruments in one feed never
-     * share a bar or a signal. Every pipeline runs on the calling thread, in tick order; the
-     * model and the sink are shared between them.
+     * share a bar or a signal. Every pipeline runs on the calling thread, in tick order, and
+     * the sink is shared between them.
+     *
+     * The model is chosen per pipeline by a ModelResolver, and so is the feature set: each
+     * pipeline's FeatureBus computes the features its own model was trained on. That matters
+     * because LinearModel::predict skips names it does not know, so one feature set for models
+     * trained on different ones would score some of them on a subset of their weights, silently.
      */
     class StreamEngine
     {
     public:
         // Throws std::invalid_argument for Route with a config symbol, which asks for one
         // symbol and for all of them at once.
+        // One model for every symbol, its features taken from config.features.
         explicit StreamEngine(StreamConfig config,
                               std::shared_ptr<fin::ml::IModel> model = nullptr,
                               ISignalSink *sink = nullptr);
+
+        // A model per symbol. Creating a pipeline throws std::invalid_argument when the
+        // resolved model records a feature set and config.features names a different one.
+        StreamEngine(StreamConfig config, ModelResolver resolver, ISignalSink *sink = nullptr);
 
         // Pinned in place: last_ points into pipelines_, and a copy or a moved-from engine
         // would be left holding a pointer into a map it does not own.
@@ -64,6 +91,9 @@ namespace fin::stream
         // under Reject and Skip, one per instrument seen under Route.
         [[nodiscard]] const std::vector<std::string> &symbols() const noexcept { return order_; }
 
+        // Whether that symbol's pipeline predicts; false for a symbol with no pipeline.
+        [[nodiscard]] bool has_model(const std::string &symbol) const;
+
         // By value: the routing counters live here and the stage counters live in the
         // pipelines, and the caller wants one view of both. Under Route the pipelines' counters
         // are summed. Not on the hot path.
@@ -77,7 +107,7 @@ namespace fin::stream
         SymbolPipeline &pipeline_for(const std::string &symbol);
 
         StreamConfig config_;
-        std::shared_ptr<fin::ml::IModel> model_;
+        ModelResolver resolver_;
         ISignalSink *sink_ = nullptr;
 
         std::string bound_symbol_;
