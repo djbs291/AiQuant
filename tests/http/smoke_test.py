@@ -172,6 +172,110 @@ def check_static(tmp):
         print("  ok  examples/dashboard is present")
 
 
+def check_scenario_paths(tmp):
+    """The files a scenario names are held to --root: its ticks, and any model_out.
+
+    POST /run-config once wrote model_out wherever it pointed, so these check both that the
+    request is refused and that nothing was written.
+    """
+    root = os.path.join(tmp, "paths_root")
+    os.mkdir(root)
+    ticks = os.path.join(root, "ticks.csv")
+    write_ticks(ticks)
+
+    outside_ticks = os.path.join(tmp, "outside_ticks.csv")
+    write_ticks(outside_ticks)
+    outside_model = os.path.join(tmp, "escaped_model.csv")
+
+    port, proc = start_server(["--root", root])
+    try:
+        def run_config(ini):
+            return request(port, "POST", "/run-config", ini)
+
+        status, body = run_config(f"ticks = {outside_ticks}\n")
+        check("POST /run-config (ticks outside root)", status, 403)
+        assert "Ticks path" in body, body
+
+        status, _ = run_config(f"ticks = {os.path.join(root, 'nope.csv')}\n")
+        check("POST /run-config (ticks missing inside root)", status, 404)
+
+        # The scenario file itself is inside the root; what it points at is not. The file's
+        # contents are checked, not just its location.
+        inner = os.path.join(root, "points_out.ini")
+        with open(inner, "w") as f:
+            f.write(f"ticks = {outside_ticks}\n")
+        status, _ = request(port, "POST", "/run-file", "points_out.ini")
+        check("POST /run-file (scenario inside root, ticks outside)", status, 403)
+
+        status, body = run_config(f"ticks = {ticks}\nmodel_out = {outside_model}\n")
+        check("POST /run-config (model_out outside root)", status, 403)
+        assert not os.path.exists(outside_model), "model_out was written outside the root"
+
+        # Relative paths resolve against the server's working directory, so climbing out of it
+        # has to be refused as well, and must not create anything where it points.
+        cwd_escape = os.path.relpath(outside_model, os.getcwd())
+        status, _ = run_config(f"ticks = {ticks}\nmodel_out = {cwd_escape}\n")
+        check("POST /run-config (relative model_out outside root)", status, 403)
+        assert not os.path.exists(outside_model), "model_out was written outside the root"
+
+        if hasattr(os, "symlink"):
+            # A link inside the root to a file outside it, existing and not yet created.
+            victim = os.path.join(tmp, "victim.csv")
+            with open(victim, "w") as f:
+                f.write("do not overwrite\n")
+            existing_link = os.path.join(root, "existing_link.csv")
+            os.symlink(victim, existing_link)
+            status, _ = run_config(f"ticks = {ticks}\nmodel_out = {existing_link}\n")
+            check("POST /run-config (model_out via symlink to a file outside)", status, 403)
+            with open(victim) as f:
+                assert f.read() == "do not overwrite\n", "the symlink target was overwritten"
+
+            dangling_target = os.path.join(tmp, "dangling_target.csv")
+            dangling_link = os.path.join(root, "dangling_link.csv")
+            os.symlink(dangling_target, dangling_link)
+            status, _ = run_config(f"ticks = {ticks}\nmodel_out = {dangling_link}\n")
+            check("POST /run-config (model_out via dangling symlink)", status, 403)
+            assert not os.path.exists(dangling_target), "a dangling symlink was followed out of the root"
+
+            ticks_link = os.path.join(root, "ticks_link.csv")
+            os.symlink(outside_ticks, ticks_link)
+            status, _ = run_config(f"ticks = {ticks_link}\n")
+            check("POST /run-config (ticks via symlink to a file outside)", status, 403)
+
+        # Inside the root, both still work: train over HTTP, then serve the model by name.
+        inside_model = os.path.join(root, "trained.csv")
+        status, _ = run_config(f"ticks = {ticks}\nmodel_out = {inside_model}\n")
+        check("POST /run-config (model_out inside root)", status, 200)
+        with open(inside_model) as f:
+            assert f.readline().startswith("# AiQuant"), "model_out inside the root was not written"
+        status, _ = request(port, "POST", "/predict",
+                            json.dumps({"model": "trained.csv",
+                                        "features": {"close": 100.0, "ema_fast": 100.0, "rsi": 50.0,
+                                                     "macd": 0.0, "macd_signal": 0.0, "macd_hist": 0.0}}))
+        check("POST /predict (model trained over HTTP)", status, 200)
+
+        missing_dir = os.path.join(root, "no_such_dir", "model.csv")
+        status, _ = run_config(f"ticks = {ticks}\nmodel_out = {missing_dir}\n")
+        check("POST /run-config (model_out in a missing directory)", status, 404)
+
+        assert proc.poll() is None, "server died during the path checks"
+    finally:
+        stop_server(proc)
+
+
+def check_bind(tmp):
+    """Loopback by default; --bind takes an IPv4 address and refuses anything else."""
+    port, proc = start_server(["--root", tmp, "--bind", "127.0.0.1"])
+    try:
+        check("GET /health with --bind 127.0.0.1", request(port, "GET", "/health")[0], 200)
+    finally:
+        stop_server(proc)
+
+    result = subprocess.run([SERVER, "--port", str(free_port()), "--bind", "not-an-ip"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+    check("--bind not-an-ip exit code", result.returncode, 2)
+
+
 def main():
     if not os.path.exists(SERVER):
         print(f"{SERVER} not found; build the project first", file=sys.stderr)
@@ -183,8 +287,9 @@ def main():
 
         ticks = os.path.join(root, "ticks.csv")
         write_ticks(ticks)
-        # The root restriction covers the INI path; ticks_path is resolved by the engine,
-        # so keep it absolute and independent of the server's working directory.
+        # Paths inside a scenario resolve against the server's working directory, as on the
+        # CLI, and must land inside --root. Keep them absolute so the test does not depend on
+        # where it is run from; check_scenario_paths covers the containment itself.
         scenario = os.path.join(root, "mvp.ini")
         with open(scenario, "w") as f:
             f.write(f"ticks = {ticks}\ntf = M1\n")
@@ -337,6 +442,8 @@ def main():
             stop_server(proc)
 
         check_static(tmp)
+        check_scenario_paths(tmp)
+        check_bind(tmp)
 
     print("aiquant_http OK")
     return 0
