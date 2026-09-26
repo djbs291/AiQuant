@@ -169,6 +169,11 @@ namespace fin::ml
             out << "\n";
         }
 
+        // Which instrument this was trained on, so a file saved under another symbol's name
+        // is caught when a directory of per-symbol models is loaded.
+        if (!model.symbol().empty())
+            out << "# symbol: " << model.symbol() << "\n";
+
         out << std::setprecision(12);
         out << "bias," << model.bias() << "\n";
 

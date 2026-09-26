@@ -2,7 +2,9 @@
 
 #include <charconv>
 #include <cctype>
+#include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
@@ -109,6 +111,7 @@ namespace fin::ml
 
         std::vector<std::pair<std::string, double>> named;
         std::vector<std::string> feature_names;
+        std::string symbol;
         double bias = 0.0;
         bool bias_set = false;
 
@@ -137,6 +140,11 @@ namespace fin::ml
                         list.remove_prefix(comma + 1);
                     }
                 }
+
+                // "# symbol: ABC" records the instrument the model was trained on.
+                constexpr std::string_view symbol_prefix = "# symbol:";
+                if (sv.size() > symbol_prefix.size() && sv.substr(0, symbol_prefix.size()) == symbol_prefix)
+                    symbol = std::string(trim(sv.substr(symbol_prefix.size())));
                 continue;
             }
 
@@ -174,7 +182,70 @@ namespace fin::ml
 
         set_named_weights(std::move(named), bias_set ? bias : 0.0);
         feature_names_ = std::move(feature_names);
+        symbol_ = std::move(symbol);
         return ready_;
+    }
+
+    bool load_linear_model_dir(const std::string &dir,
+                               std::unordered_map<std::string, std::shared_ptr<LinearModel>> &out,
+                               std::string &error)
+    {
+        namespace fs = std::filesystem;
+
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec))
+        {
+            error = "Model directory not found: " + dir;
+            return false;
+        }
+
+        std::vector<fs::path> files;
+        for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+        {
+            const fs::path &path = it->path();
+            const std::string name = path.filename().string();
+            std::error_code type_ec;
+            if (name.empty() || name.front() == '.' || path.extension() != ".csv" ||
+                !it->is_regular_file(type_ec))
+                continue;
+            files.push_back(path);
+        }
+        if (ec)
+        {
+            error = "Cannot read model directory " + dir + ": " + ec.message();
+            return false;
+        }
+
+        // Sorted, so which bad file gets reported does not depend on the directory's order.
+        std::sort(files.begin(), files.end());
+
+        std::unordered_map<std::string, std::shared_ptr<LinearModel>> loaded;
+        for (const auto &path : files)
+        {
+            const std::string symbol = path.stem().string();
+            auto model = std::make_shared<LinearModel>();
+            if (!model->load_from_file(path.string()))
+            {
+                error = "Failed to load model file " + path.string();
+                return false;
+            }
+            if (!model->symbol().empty() && model->symbol() != symbol)
+            {
+                error = "Model file " + path.string() + " was trained on '" + model->symbol() +
+                        "', not '" + symbol + "'";
+                return false;
+            }
+            loaded.emplace(symbol, std::move(model));
+        }
+
+        if (loaded.empty())
+        {
+            error = "No model files (*.csv) in " + dir;
+            return false;
+        }
+
+        out = std::move(loaded);
+        return true;
     }
 
     void LinearModel::validate_schema(const FeatureVector &features) const
