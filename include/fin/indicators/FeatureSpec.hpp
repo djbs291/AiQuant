@@ -4,8 +4,10 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "fin/indicators/IIndicatorCandle.hpp"
@@ -39,6 +41,9 @@ namespace fin::indicators
     {
         std::string_view name;
         IndicatorFactory make;
+        // The FeatureParams fields `make` reads, by key (see feature_param_keys). A model file
+        // records exactly these, so it can be rebuilt with the periods it was trained on.
+        std::vector<std::string_view> params;
     };
 
     // Every feature name a scenario may list, in catalogue order.
@@ -49,6 +54,22 @@ namespace fin::indicators
 
     // The historical set, kept as the default so existing scenarios are unaffected.
     const std::vector<std::string> &default_feature_names();
+
+    // Every FeatureParams field, by the name it goes by in a model file and a scenario, in
+    // declaration order. The one table both the writer and the reader of "# params:" use.
+    const std::vector<std::string_view> &feature_param_keys();
+
+    // nullopt for an unknown key.
+    std::optional<double> get_feature_param(const FeatureParams &params, std::string_view key);
+
+    // False, leaving `params` unchanged, for an unknown key or a value that cannot be one: a
+    // period must be a whole number >= 1, and bb_k finite and > 0.
+    bool set_feature_param(FeatureParams &params, std::string_view key, double value);
+
+    // The parameters the named features read, each once, in feature_param_keys() order, with
+    // their values in `params`. Unknown names contribute nothing.
+    std::vector<std::pair<std::string, double>> feature_params_for(const std::vector<std::string> &features,
+                                                                   const FeatureParams &params);
 }
 
 #endif // FIN_INDICATORS_FEATURE_SPEC_HPP
