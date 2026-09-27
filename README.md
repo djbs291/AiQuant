@@ -78,6 +78,11 @@ One CSV row per signal on stdout (so it pipes), the summary on stderr. `--all` i
 bars, `--limit N` stops printing after N rows. Without `--features` the set recorded in the
 model file is used, so a model is never applied to a feature set it was not trained on.
 
+The `prediction` column is the model's forecast made **on that row's candle**, from its own
+features: the expected move from this close to the next one. The row's signal was decided with
+it, together with the indicator rules on the same candle — the same convention `run-mvp`,
+`run-config` and `backtest` follow, so all four report the same trades for the same model.
+
 By default a stream carries **one symbol**. A file holding a second one is refused, naming
 both, rather than blended into a single candle series. Two flags change that:
 
