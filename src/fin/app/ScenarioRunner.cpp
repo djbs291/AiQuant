@@ -7,7 +7,9 @@
 #include <string>
 #include <utility>
 
+#include "fin/app/ScenarioUtils.hpp"
 #include "fin/indicators/FeatureBus.hpp"
+#include "fin/indicators/FeatureSpec.hpp"
 #include "fin/ml/FeatureVector.hpp"
 #include "fin/signal/SignalEngine.hpp"
 
@@ -307,6 +309,11 @@ namespace fin::app
         // Carried by the model, and so written into any file it is saved to: a per-symbol model
         // directory can then tell a model stored under the wrong symbol's name.
         training_summary.model.set_symbol(result.symbol);
+        // And the periods and candles its features were computed with, so whoever loads the
+        // file rebuilds the same features rather than whatever its own flags say.
+        training_summary.model.set_training_params(
+            fin::indicators::feature_params_for(result.features, make_feature_params(config)));
+        training_summary.model.set_timeframe(fin::io::timeframe_token(config.timeframe));
         result.training = training_summary;
 
         double sse = 0.0;

@@ -182,7 +182,7 @@ TEST_CASE("A model directory written by run_scenario drives the stream", "[strea
                                const auto it = loaded.find(symbol);
                                if (it == loaded.end())
                                    return SymbolModel{};
-                               return SymbolModel{it->second, it->second->feature_names()};
+                               return SymbolModel{it->second, it->second->feature_names(), std::nullopt, std::nullopt};
                            }};
 
     fin::io::FileTickSource source(ticks.string());
@@ -271,7 +271,7 @@ TEST_CASE("A configured feature set that contradicts the model is refused", "[st
 
     const std::vector<std::string> recorded{"close", "rsi"};
     ModelResolver resolver{[&recorded](const std::string &)
-                           { return SymbolModel{std::make_shared<fin::ml::LinearModel>(), recorded}; }};
+                           { return SymbolModel{std::make_shared<fin::ml::LinearModel>(), recorded, std::nullopt, std::nullopt}; }};
 
     fin::io::MockTickSource source({make_tick(1693492800000LL, 100.0, "ABC")});
     StreamEngine engine(cfg, std::move(resolver));

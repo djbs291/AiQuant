@@ -35,7 +35,7 @@ namespace fin::stream
                                ISignalSink *sink)
         : StreamEngine(std::move(config),
                        ModelResolver{[model = std::move(model)](const std::string &)
-                                     { return SymbolModel{model, {}}; }},
+                                     { return SymbolModel{model, {}, std::nullopt, std::nullopt}; }},
                        sink)
     {
     }
@@ -77,6 +77,13 @@ namespace fin::stream
                 }
                 pipeline_config.features = resolved.features;
             }
+            // The periods feed the FeatureBus and the snapshot's EMA/RSI alike, exactly as one
+            // ScenarioConfig feeds both in run_scenario; that is what keeps a stream on a
+            // model's own settings equal to the batch run that trained it.
+            if (resolved.params)
+                pipeline_config.params = *resolved.params;
+            if (resolved.timeframe)
+                pipeline_config.timeframe = *resolved.timeframe;
 
             it = pipelines_.try_emplace(symbol, symbol, pipeline_config, std::move(resolved.model), sink_).first;
             order_.push_back(symbol);

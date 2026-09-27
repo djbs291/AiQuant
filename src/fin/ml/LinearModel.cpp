@@ -11,6 +11,8 @@
 #include <string>
 #include <string_view>
 
+#include "fin/indicators/FeatureSpec.hpp"
+
 namespace fin::ml
 {
     namespace
@@ -112,6 +114,8 @@ namespace fin::ml
         std::vector<std::pair<std::string, double>> named;
         std::vector<std::string> feature_names;
         std::string symbol;
+        std::vector<std::pair<std::string, double>> training_params;
+        std::string timeframe;
         double bias = 0.0;
         bool bias_set = false;
 
@@ -145,6 +149,40 @@ namespace fin::ml
                 constexpr std::string_view symbol_prefix = "# symbol:";
                 if (sv.size() > symbol_prefix.size() && sv.substr(0, symbol_prefix.size()) == symbol_prefix)
                     symbol = std::string(trim(sv.substr(symbol_prefix.size())));
+
+                // "# timeframe: M1" records the candles it was trained on.
+                constexpr std::string_view timeframe_prefix = "# timeframe:";
+                if (sv.size() > timeframe_prefix.size() && sv.substr(0, timeframe_prefix.size()) == timeframe_prefix)
+                    timeframe = std::string(trim(sv.substr(timeframe_prefix.size())));
+
+                // "# params: rsi=10,atr=7" records the periods the features were computed with.
+                // Held to the same standard as a weight: the line is machine-written, so an
+                // item that does not parse, an unknown key or an impossible value is a corrupt
+                // file, and loading it would rebuild the features with the wrong periods.
+                constexpr std::string_view params_prefix = "# params:";
+                if (sv.size() >= params_prefix.size() && sv.substr(0, params_prefix.size()) == params_prefix)
+                {
+                    training_params.clear();
+                    fin::indicators::FeatureParams scratch{};
+                    std::string_view list = trim(sv.substr(params_prefix.size()));
+                    while (!list.empty())
+                    {
+                        const auto comma = list.find(',');
+                        const auto end = (comma == std::string_view::npos) ? list.size() : comma;
+                        const std::string_view item = trim(list.substr(0, end));
+                        const auto eq = item.find('=');
+                        if (eq == std::string_view::npos)
+                            return false;
+                        const std::string_view key = trim(item.substr(0, eq));
+                        const auto value = parse_double(trim(item.substr(eq + 1)));
+                        if (!value || !fin::indicators::set_feature_param(scratch, key, *value))
+                            return false;
+                        training_params.emplace_back(std::string(key), *value);
+                        if (comma == std::string_view::npos)
+                            break;
+                        list.remove_prefix(comma + 1);
+                    }
+                }
                 continue;
             }
 
@@ -183,6 +221,8 @@ namespace fin::ml
         set_named_weights(std::move(named), bias_set ? bias : 0.0);
         feature_names_ = std::move(feature_names);
         symbol_ = std::move(symbol);
+        training_params_ = std::move(training_params);
+        timeframe_ = std::move(timeframe);
         return ready_;
     }
 

@@ -62,12 +62,25 @@ namespace fin::ml
         [[nodiscard]] const std::string &symbol() const noexcept { return symbol_; }
         void set_symbol(std::string symbol) { symbol_ = std::move(symbol); }
 
+        // The indicator parameters the model's features were computed with, from a
+        // "# params: rsi=10,atr=7" line: exactly the ones its features read, keyed as in
+        // fin::indicators::feature_param_keys(). Empty for files written before it existed.
+        [[nodiscard]] const std::vector<std::pair<std::string, double>> &training_params() const noexcept { return training_params_; }
+        void set_training_params(std::vector<std::pair<std::string, double>> params) { training_params_ = std::move(params); }
+
+        // The candle timeframe the model was trained on ("M1", ...), from "# timeframe:".
+        // Kept as the token: fin_ml does not depend on fin_io, which owns the enum.
+        [[nodiscard]] const std::string &timeframe() const noexcept { return timeframe_; }
+        void set_timeframe(std::string timeframe) { timeframe_ = std::move(timeframe); }
+
     private:
         double bias_ = 0.0;
         std::vector<double> weights_{};
         std::vector<std::pair<std::string, double>> named_weights_{};
         std::vector<std::string> feature_names_{};
         std::string symbol_{};
+        std::vector<std::pair<std::string, double>> training_params_{};
+        std::string timeframe_{};
         bool ready_ = false;
     };
 
