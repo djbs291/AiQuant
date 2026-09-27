@@ -10,24 +10,6 @@ namespace fin::app
 {
     namespace
     {
-        const char *timeframe_to_cstr(fin::io::Timeframe tf)
-        {
-            switch (tf)
-            {
-            case fin::io::Timeframe::S1:
-                return "S1";
-            case fin::io::Timeframe::S5:
-                return "S5";
-            case fin::io::Timeframe::M5:
-                return "M5";
-            case fin::io::Timeframe::H1:
-                return "H1";
-            case fin::io::Timeframe::M1:
-            default:
-                return "M1";
-            }
-        }
-
         void append_metrics_json(std::ostream &out, const ScenarioResult &result)
         {
             out << "  \"metrics\": {\n    \"final_cash\": ";
@@ -54,7 +36,7 @@ namespace fin::app
         // were left out rather than blended into these candles.
         out << "  \"symbol\": " << std::quoted(result.symbol) << ",\n";
         out << "  \"ticks_other_symbol\": " << result.ticks_other_symbol << ",\n";
-        out << "  \"timeframe\": \"" << timeframe_to_cstr(cfg.timeframe) << "\",\n";
+        out << "  \"timeframe\": \"" << fin::io::timeframe_token(cfg.timeframe) << "\",\n";
         out << "  \"candles\": " << result.candles << ",\n";
         out << "  \"warmup_candles\": " << result.warmup_candles << ",\n";
         out << "  \"feature_rows\": " << result.feature_rows << ",\n";

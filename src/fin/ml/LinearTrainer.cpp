@@ -174,6 +174,19 @@ namespace fin::ml
         if (!model.symbol().empty())
             out << "# symbol: " << model.symbol() << "\n";
 
+        // The periods and the candles the features were computed on, so a reader rebuilds
+        // them as they were rather than with whatever its own flags happen to say.
+        if (!model.timeframe().empty())
+            out << "# timeframe: " << model.timeframe() << "\n";
+        const auto &params = model.training_params();
+        if (!params.empty())
+        {
+            out << "# params:";
+            for (std::size_t i = 0; i < params.size(); ++i)
+                out << (i == 0 ? " " : ",") << params[i].first << '=' << std::setprecision(12) << params[i].second;
+            out << "\n";
+        }
+
         out << std::setprecision(12);
         out << "bias," << model.bias() << "\n";
 
