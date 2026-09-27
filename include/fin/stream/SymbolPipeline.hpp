@@ -61,7 +61,6 @@ namespace fin::stream
         std::shared_ptr<fin::ml::IModel> model_;
         ISignalSink *sink_ = nullptr;
 
-        std::optional<double> pending_prediction_;
         std::optional<fin::core::Timestamp> last_tick_ts_;
         StreamStats stats_{};
     };

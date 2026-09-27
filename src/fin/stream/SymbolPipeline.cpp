@@ -72,9 +72,33 @@ namespace fin::stream
         snapshot.ema_slow = ema_slow_.is_ready() ? std::optional<double>(ema_slow_.value()) : std::nullopt;
         snapshot.rsi = rsi_.is_ready() ? std::optional<double>(rsi_.value()) : std::nullopt;
 
-        // 2. Judge this bar with the prediction made on the PREVIOUS one. run_scenario hands
-        //    the pending prediction to the backtester before refreshing it, and so do we.
-        const fin::signal::Signal signal = engine_.eval(snapshot, pending_prediction_);
+        // 2. This bar's features, and the model's prediction from them: the forecast of the
+        //    move to the next close, made at this close. run_scenario does the same.
+        std::optional<fin::indicators::FeatureRow> row = bus_.update(candle);
+        std::optional<double> prediction;
+        if (row)
+        {
+            ++stats_.feature_rows;
+            if (model_)
+            {
+                try
+                {
+                    prediction = model_->predict(fin::ml::FeatureVector::from_feature_row(*row));
+                    ++stats_.predictions;
+                }
+                catch (const std::exception &)
+                {
+                    // A live feed must not die because one bar upset the model; cmd_backtest
+                    // takes the same posture. The bar is simply judged without one.
+                    ++stats_.prediction_errors;
+                }
+            }
+        }
+
+        // 3. Judge this bar with that prediction, as the indicator rules judge it with this
+        //    bar's EMA and RSI. Until 2026-09 the prediction was held back one bar, so the
+        //    model voted on a move that had already happened by the time it was traded on.
+        const fin::signal::Signal signal = engine_.eval(snapshot, prediction);
         ++stats_.signals;
         switch (signal.type)
         {
@@ -89,39 +113,10 @@ namespace fin::stream
             break;
         }
 
-        // 3. Only now does this bar reach the feature bus.
-        std::optional<fin::indicators::FeatureRow> row = bus_.update(candle);
-        if (row)
-            ++stats_.feature_rows;
-
         if (sink_)
         {
-            const StreamEvent event{symbol_, candle, row ? &*row : nullptr,
-                                    pending_prediction_, signal, partial};
+            const StreamEvent event{symbol_, candle, row ? &*row : nullptr, prediction, signal, partial};
             sink_->on_signal(event);
-        }
-
-        // 4. And only now is the pending prediction refreshed, for the next bar to be judged on.
-        if (row && model_)
-        {
-            try
-            {
-                pending_prediction_ = model_->predict(fin::ml::FeatureVector::from_feature_row(*row));
-                ++stats_.predictions;
-            }
-            catch (const std::exception &)
-            {
-                // A live feed must not die because one bar upset the model; cmd_backtest takes
-                // the same posture. The bar simply carries no prediction forward.
-                ++stats_.prediction_errors;
-                pending_prediction_.reset();
-            }
-        }
-        else
-        {
-            // Load-bearing: run_scenario clears the pending prediction on a warmup bar, and
-            // this line is what the stream/batch equivalence test is really protecting.
-            pending_prediction_.reset();
         }
     }
 

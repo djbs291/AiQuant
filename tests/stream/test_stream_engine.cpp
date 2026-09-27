@@ -31,8 +31,8 @@ namespace
 
     std::shared_ptr<fin::ml::IModel> close_echo_model()
     {
-        // prediction = 1.0 * close + 0.0, so a bar's prediction is simply its own close and
-        // the pending-prediction convention becomes visible by inspection.
+        // prediction = 1.0 * close + 0.0, so a bar's prediction is simply the close it was
+        // computed from, and which bar a prediction belongs to is visible by inspection.
         auto model = std::make_shared<fin::ml::LinearModel>();
         model->set_named_weights({{"close", 1.0}}, 0.0);
         return model;
@@ -67,7 +67,7 @@ TEST_CASE("StreamEngine emits one event per candle, the last one partial", "[str
         REQUIRE(event.symbol == "ABC");
 }
 
-TEST_CASE("A candle is judged on the previous candle's prediction", "[stream]")
+TEST_CASE("A candle is judged on its own prediction", "[stream]")
 {
     fin::io::MockTickSource source(minutely_ticks(10));
 
@@ -80,17 +80,15 @@ TEST_CASE("A candle is judged on the previous candle's prediction", "[stream]")
 
     REQUIRE(sink.events.size() == 10);
 
-    // The first bar has nothing behind it, so it is judged with no prediction at all.
-    REQUIRE_FALSE(sink.events.front().prediction.has_value());
-
-    // Every later bar carries the prediction made on its predecessor, which with this model
-    // is exactly the predecessor's close. A one-bar shift here would be invisible in the
-    // candle data and would quietly change every trade.
-    for (std::size_t i = 1; i < sink.events.size(); ++i)
+    // Every bar, the first included, carries the prediction made from its own features --
+    // with this model, exactly its own close. The model forecasts the move to the next close,
+    // so this is the bar to act on it; it used to arrive one bar late, after the move it
+    // forecast. A one-bar shift here is invisible in the candle data and changes every trade.
+    for (std::size_t i = 0; i < sink.events.size(); ++i)
     {
         REQUIRE(sink.events[i].prediction.has_value());
         REQUIRE(*sink.events[i].prediction ==
-                Approx(sink.events[i - 1].candle.close().value()).margin(1e-9));
+                Approx(sink.events[i].candle.close().value()).margin(1e-9));
     }
 }
 
@@ -123,13 +121,14 @@ TEST_CASE("No prediction is carried until the whole feature set is warm", "[stre
     REQUIRE(first_row < sink.events.size());
 
     // The invariant, stated without depending on what the warmup length happens to be: the
-    // first bar that carries a prediction is exactly one after the first bar that had a row
-    // to compute one from.
-    REQUIRE(first_prediction == first_row + 1);
+    // first bar that carries a prediction is the first bar that had a row to compute one from.
+    REQUIRE(first_prediction == first_row);
 
-    // Everything before that is judged on no prediction at all.
-    for (std::size_t i = 0; i <= first_row; ++i)
+    // Everything before that is judged on no prediction at all, and every row gets one.
+    for (std::size_t i = 0; i < first_row; ++i)
         REQUIRE_FALSE(sink.events[i].prediction.has_value());
+    for (const auto &event : sink.events)
+        REQUIRE(event.has_row == event.prediction.has_value());
 }
 
 TEST_CASE("A model that throws is counted and the stream keeps going", "[stream]")

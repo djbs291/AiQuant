@@ -37,7 +37,7 @@ namespace fin::stream
      *
      * Reject and Skip bind the stream to one symbol and keep exactly one pipeline. Route binds
      * to none: each symbol gets its own pipeline the first time it appears, with its own
-     * candles, indicators, warmup and pending prediction, so two instruments in one feed never
+     * candles, indicators, warmup and out-of-order clock, so two instruments in one feed never
      * share a bar or a signal. Every pipeline runs on the calling thread, in tick order, and
      * the sink is shared between them.
      *

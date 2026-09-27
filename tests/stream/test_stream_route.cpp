@@ -65,7 +65,7 @@ namespace
 TEST_CASE("Routing gives each symbol exactly the stream it would have alone", "[stream][route]")
 {
     // The property that makes routing safe: a pipeline cannot tell whether other symbols
-    // share its feed. Candles, warmup, the pending prediction and the signal all have to match
+    // share its feed. Candles, warmup, the prediction and the signal all have to match
     // a run that filtered the file down to that one symbol, with a real model in the loop so a
     // prediction leaking from one pipeline into the next would show.
     const auto ticks = scenario_test::write_two_symbol_ticks();

@@ -84,7 +84,7 @@ TEST_CASE("The streaming path matches the batch path bar for bar", "[stream][bat
 
     // --- Same trades ---
     // The tamper-proof half. Feed what the stream dispatched into a fresh Backtester wired
-    // exactly as run_scenario wires it: any one-bar shift in the pending prediction, or any
+    // exactly as run_scenario wires it: any one-bar shift in when a prediction is used, or any
     // drift in the snapshot indicators, changes the trades and fails here.
     fin::signal::SignalEngineConfig scfg{};
     scfg.rsi_buy_below = cfg.rsi_buy;
