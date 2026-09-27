@@ -108,6 +108,39 @@ A model file records the symbol it was trained on (`# symbol: ABC`), and the dir
 at startup if a file's recorded symbol differs from its name, so ABC's model copied to
 `XYZ.csv` never scores XYZ. Every file is loaded before the first tick.
 
+### Model files
+
+A model file is the weights plus everything needed to compute the inputs the way they were
+computed in training. `run-mvp`, `run-config` and `train-linear` write it:
+
+```
+# AiQuant LinearModel weights
+# features: close,rsi,atr
+# symbol: ABC
+# timeframe: M5
+# params: rsi=10,atr=7
+bias,1.83978125376
+close,-0.0188589026482
+...
+```
+
+`# params` lists only the parameters its features read (`close` reads none, the MACD columns
+read `macd_fast`, `macd_slow` and `macd_signal`), keyed as in a scenario. `stream` and
+`backtest` **adopt** the recorded features, parameters and timeframe, so a model trained with
+`rsi = 10` on M5 candles runs on M5 candles with RSI 10 without any flag. A flag that
+contradicts the file is refused before the first tick:
+
+```
+$ aiquant stream ticks.csv --model-linear model.csv --rsi 14
+rsi 14 was asked for, but the model was trained with rsi = 10
+```
+
+With `--model-dir`, each symbol's pipeline takes its own model's settings, so one directory can
+hold models trained on different timeframes. A file written before these lines existed carries
+none of them, and the flags or the defaults apply as they always did. The lines are comments, so
+older readers skip them; a `# params` line that does not parse fails the load, like a corrupt
+weight.
+
 Threads, queues and SIMD are not here yet: the pipelines run one after another on the calling
 thread, in tick order. That is a measured choice, not only a missing feature: on 1M ticks over 4
 symbols (Release, M1) the whole stream takes about as long as reading and resampling the CSV
