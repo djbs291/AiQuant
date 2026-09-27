@@ -12,6 +12,7 @@
 #include <chrono>
 #include <exception>
 #include <memory>
+#include <sstream>
 #include <unordered_map>
 
 #include "fin/io/Pipeline.hpp"
@@ -140,6 +141,61 @@ static std::vector<std::string> parse_feature_list(const std::vector<std::string
     return features;
 }
 
+// The indicator flags a user can type, and the FeatureParams key each one sets.
+static const std::pair<const char *, const char *> kParamFlags[] = {
+    {"--ema-fast", "ema_fast"}, {"--ema-slow", "ema_slow"}, {"--rsi", "rsi"},
+    {"--macd-fast", "macd_fast"}, {"--macd-slow", "macd_slow"}, {"--macd-signal", "macd_signal"},
+};
+
+// --tf is only an override when it is typed, and a token that is not a timeframe is an error
+// rather than the M1 that parse_timeframe_flag quietly falls back to.
+static bool explicit_timeframe(const std::vector<std::string> &args, std::optional<fin::io::Timeframe> &out)
+{
+    for (std::size_t i = 1; i + 1 < args.size(); ++i)
+    {
+        if (args[i] == "--tf")
+        {
+            out = fin::app::parse_timeframe_token(args[i + 1]);
+            if (!out)
+            {
+                std::cerr << "Unknown --tf '" << args[i + 1] << "' (expected S1, S5, M1, M5 or H1)\n";
+                return false;
+            }
+            return true;
+        }
+    }
+    out.reset();
+    return true;
+}
+
+// What the user typed, as opposed to what defaulted: only these can contradict a model file.
+static fin::stream::ModelOverrides explicit_overrides(const std::vector<std::string> &args,
+                                                      std::vector<std::string> features,
+                                                      std::optional<fin::io::Timeframe> timeframe)
+{
+    fin::stream::ModelOverrides overrides;
+    overrides.features = std::move(features);
+    overrides.timeframe = timeframe;
+    for (const auto &[flag, key] : kParamFlags)
+    {
+        if (auto v = parse_size_flag(args, flag))
+            overrides.params.emplace_back(key, static_cast<double>(*v));
+    }
+    return overrides;
+}
+
+// "tf M5, rsi=10, atr=7": what a model file made the run adopt, for the summary.
+static std::string describe_model_settings(const fin::ml::LinearModel &model)
+{
+    std::ostringstream out;
+    out << "tf " << (model.timeframe().empty() ? "unrecorded" : model.timeframe());
+    if (model.training_params().empty())
+        out << ", periods unrecorded";
+    for (const auto &[key, value] : model.training_params())
+        out << ", " << key << '=' << value;
+    return out.str();
+}
+
 static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
@@ -150,8 +206,36 @@ static int cmd_backtest(const std::vector<std::string> &args)
 
     const std::string path = args[0];
 
+    std::optional<fin::io::Timeframe> typed_tf;
+    if (!explicit_timeframe(args, typed_tf))
+        return 2;
+
+    // The model comes first: the candles, the features and their periods may all be the ones
+    // it records, and they have to be settled before a single candle is built.
+    std::optional<fin::ml::LinearModel> linear_model;
+    fin::stream::SymbolModel settings;
+    if (auto model_path = parse_string_flag(args, "--model-linear"))
+    {
+        auto loaded = std::make_shared<fin::ml::LinearModel>();
+        if (!loaded->load_from_file(*model_path))
+        {
+            // It used to carry on without the model, which reported a backtest of a strategy
+            // nobody asked for.
+            std::cerr << "Failed to load linear model configuration: " << *model_path << "\n";
+            return 1;
+        }
+        std::string error;
+        if (!fin::stream::symbol_model_from(loaded, explicit_overrides(args, {}, typed_tf), {}, settings, error))
+        {
+            std::cerr << error << "\n";
+            return 1;
+        }
+        linear_model = *loaded;
+        std::cerr << "Model: " << describe_model_settings(*loaded) << "\n";
+    }
+
     fin::io::TickCsvOptions opt{}; // defaults: header, epoch-ms
-    auto tf = parse_timeframe_flag(args);
+    const auto tf = settings.timeframe.value_or(typed_tf.value_or(fin::io::Timeframe::M1));
     auto res = fin::io::resample_csv_with_stats(path, tf, opt);
 
     fin::backtest::BacktestConfig cfg{}; // defaults
@@ -167,29 +251,28 @@ static int cmd_backtest(const std::vector<std::string> &args)
         cfg.ema_slow = *v;
     if (auto v = parse_size_flag(args, "--rsi"))
         cfg.rsi_period = *v;
-    const std::size_t macd_fast = parse_size_flag(args, "--macd-fast").value_or(12);
-    const std::size_t macd_slow = parse_size_flag(args, "--macd-slow").value_or(26);
-    const std::size_t macd_signal = parse_size_flag(args, "--macd-signal").value_or(9);
 
+    // With a model, the features are the ones it was trained on, computed with its periods --
+    // this used to build the default six with the flags' periods whatever the file said. The
+    // snapshot EMA/RSI take the same periods, as they do in run_scenario.
     std::unique_ptr<fin::indicators::FeatureBus> feature_bus;
-    std::optional<fin::ml::LinearModel> linear_model;
-    if (auto model_path = parse_string_flag(args, "--model-linear"))
+    if (linear_model)
     {
-        fin::ml::LinearModel loaded;
-        if (!loaded.load_from_file(*model_path))
-        {
-            std::cerr << "Failed to load linear model configuration: " << *model_path << "\n";
-        }
-        else
-        {
-            linear_model = std::move(loaded);
-            feature_bus = std::make_unique<fin::indicators::FeatureBus>(cfg.ema_fast, cfg.rsi_period, macd_fast, macd_slow, macd_signal);
-        }
+        const auto &params = *settings.params;
+        cfg.ema_fast = params.ema_fast;
+        cfg.ema_slow = params.ema_slow;
+        cfg.rsi_period = params.rsi;
+        const auto &features = settings.features.empty() ? fin::indicators::default_feature_names() : settings.features;
+        feature_bus = std::make_unique<fin::indicators::FeatureBus>(features, params);
     }
     // Signal config (MVP): RSI Thresholds and EMA crossover on/off
     fin::signal::SignalEngineConfig scfg{}; // defaults: buy <= 30, sell >= 70, use EMA crossover
-    if (auto v = parse_double_flag(args, "--rsi_buy"))
+    // Both spellings, as run-mvp takes them: the usage has always said --rsi-buy, and only
+    // --rsi_buy was ever read.
+    if (auto v = parse_double_flag(args, "--rsi-buy"))
         scfg.rsi_buy_below = *v;
+    else if (auto v2 = parse_double_flag(args, "--rsi_buy"))
+        scfg.rsi_buy_below = *v2;
     if (auto v = parse_double_flag(args, "--rsi-sell"))
         scfg.rsi_sell_above = *v;
     if (flag_present(args, "--no-ema-xover"))
@@ -298,6 +381,18 @@ static int cmd_train_linear(const std::vector<std::string> &args)
         return 1;
     }
 
+    // Record what the features were computed with, as run_scenario does, so a reader can
+    // rebuild them. FeatureBus's positional constructor always builds the default six.
+    fin::indicators::FeatureParams trained_with{};
+    trained_with.ema_fast = ema_fast;
+    trained_with.rsi = rsi_period;
+    trained_with.macd_fast = macd_fast;
+    trained_with.macd_slow = macd_slow;
+    trained_with.macd_signal = macd_signal;
+    summary.model.set_training_params(
+        fin::indicators::feature_params_for(fin::indicators::default_feature_names(), trained_with));
+    summary.model.set_timeframe(fin::io::timeframe_token(tf));
+
     const std::string out_path = parse_string_flag(args, "--out").value_or("linear_model.csv");
     if (!fin::ml::save_linear_model(summary.model, out_path))
     {
@@ -357,24 +452,6 @@ static int cmd_features(const std::vector<std::string> &args)
     return 0;
 }
 
-static const char *timeframe_to_cstr(fin::io::Timeframe tf)
-{
-    switch (tf)
-    {
-    case fin::io::Timeframe::S1:
-        return "S1";
-    case fin::io::Timeframe::S5:
-        return "S5";
-    case fin::io::Timeframe::M5:
-        return "M5";
-    case fin::io::Timeframe::H1:
-        return "H1";
-    case fin::io::Timeframe::M1:
-    default:
-        return "M1";
-    }
-}
-
 // Writes the human-readable report to `os`. With --json the report goes to stderr so that
 // stdout carries nothing but the JSON document and stays pipeable into jq.
 static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin::app::ScenarioResult &result,
@@ -389,7 +466,7 @@ static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin
             os << " (" << result.ticks_other_symbol << " ticks for other symbols skipped)";
         os << "\n";
     }
-    os << "Timeframe: " << timeframe_to_cstr(cfg.timeframe) << "\n";
+    os << "Timeframe: " << fin::io::timeframe_token(cfg.timeframe) << "\n";
     os << "Candles (post-resample): " << result.candles;
     if (result.warmup_candles > 0)
         os << " (warmup " << result.warmup_candles << ")";
@@ -643,7 +720,10 @@ static int cmd_stream(const std::vector<std::string> &args)
     const std::string path = args[0];
 
     fin::stream::StreamConfig cfg{};
-    cfg.timeframe = parse_timeframe_flag(args);
+    std::optional<fin::io::Timeframe> typed_tf;
+    if (!explicit_timeframe(args, typed_tf))
+        return 2;
+    cfg.timeframe = typed_tf.value_or(fin::io::Timeframe::M1);
 
     if (auto v = parse_size_flag(args, "--ema-fast"))
         cfg.params.ema_fast = *v;
@@ -698,34 +778,39 @@ static int cmd_stream(const std::vector<std::string> &args)
         return 2;
     }
 
+    // Each model file supplies the features, periods and timeframe it was trained with, and a
+    // flag the user typed that contradicts one of them is refused here, before the first tick.
+    const auto overrides = explicit_overrides(args, cfg.features, typed_tf);
+
     // One model per symbol, all loaded before the first tick: a bad file fails here rather
     // than mid-feed, and no path is ever built from a symbol the feed supplied.
-    std::unordered_map<std::string, std::shared_ptr<fin::ml::LinearModel>> models;
+    std::unordered_map<std::string, fin::stream::SymbolModel> resolved_models;
+    std::size_t models_loaded = 0;
     if (model_dir)
     {
+        std::unordered_map<std::string, std::shared_ptr<fin::ml::LinearModel>> models;
         std::string error;
         if (!fin::ml::load_linear_model_dir(*model_dir, models, error))
         {
             std::cerr << error << "\n";
             return 1;
         }
-        // An explicit --features has to be the set every model was trained on; otherwise a
-        // model would be scored on a subset of its weights.
-        if (!cfg.features.empty())
+        models_loaded = models.size();
+        for (auto &[symbol, loaded] : models)
         {
-            for (const auto &[symbol, loaded] : models)
+            fin::stream::SymbolModel resolved;
+            if (!fin::stream::symbol_model_from(loaded, overrides, cfg.params, resolved, error))
             {
-                if (!loaded->feature_names().empty() && loaded->feature_names() != cfg.features)
-                {
-                    std::cerr << "--features differs from the set the model for " << symbol
-                              << " was trained on\n";
-                    return 1;
-                }
+                std::cerr << "model for " << symbol << ": " << error << "\n";
+                return 1;
             }
+            resolved_models.emplace(symbol, std::move(resolved));
         }
     }
 
-    std::shared_ptr<fin::ml::IModel> model;
+    // The single --model-linear model, resolved the same way. Without one, the stream runs on
+    // the flags alone, as it always has.
+    fin::stream::SymbolModel single{};
     if (auto model_path = parse_string_flag(args, "--model-linear"))
     {
         auto loaded = std::make_shared<fin::ml::LinearModel>();
@@ -734,11 +819,13 @@ static int cmd_stream(const std::vector<std::string> &args)
             std::cerr << "Failed to load linear model: " << *model_path << "\n";
             return 1;
         }
-        // Without an explicit --features, take the set the model file recorded. Feeding a
-        // model a feature set it was not trained on is the mistake this closes.
-        if (cfg.features.empty() && !loaded->feature_names().empty())
-            cfg.features = loaded->feature_names();
-        model = std::move(loaded);
+        std::string error;
+        if (!fin::stream::symbol_model_from(loaded, overrides, cfg.params, single, error))
+        {
+            std::cerr << error << "\n";
+            return 1;
+        }
+        std::cerr << "Model: " << describe_model_settings(*loaded) << "\n";
     }
 
     CsvSignalSink sink(flag_present(args, "--all"), parse_size_flag(args, "--limit").value_or(0));
@@ -746,11 +833,11 @@ static int cmd_stream(const std::vector<std::string> &args)
     fin::stream::ModelResolver resolver{[&](const std::string &symbol)
                                         {
                                             if (!model_dir)
-                                                return fin::stream::SymbolModel{model, {}};
-                                            const auto it = models.find(symbol);
-                                            if (it == models.end())
+                                                return single;
+                                            const auto it = resolved_models.find(symbol);
+                                            if (it == resolved_models.end())
                                                 return fin::stream::SymbolModel{}; // no predictions
-                                            return fin::stream::SymbolModel{it->second, it->second->feature_names()};
+                                            return it->second;
                                         }};
     fin::stream::StreamEngine engine(cfg, std::move(resolver), &sink);
 
@@ -790,7 +877,7 @@ static int cmd_stream(const std::vector<std::string> &args)
         const auto by_symbol = engine.stats_by_symbol();
         std::cerr << "Symbols: " << by_symbol.size() << "\n";
         if (model_dir)
-            std::cerr << "Models: " << models.size() << " loaded from " << *model_dir << "\n";
+            std::cerr << "Models: " << models_loaded << " loaded from " << *model_dir << "\n";
         for (const auto &[symbol, s] : by_symbol)
         {
             std::cerr << "  " << symbol << ": " << s.ticks << " ticks, " << s.candles

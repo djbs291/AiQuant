@@ -15,18 +15,11 @@
 #include "fin/ml/IModel.hpp"
 #include "fin/stream/SignalSink.hpp"
 #include "fin/stream/StreamConfig.hpp"
+#include "fin/stream/SymbolModel.hpp"
 #include "fin/stream/SymbolPipeline.hpp"
 
 namespace fin::stream
 {
-    // What one symbol's pipeline predicts with. `features` is the set the model was trained
-    // on (LinearModel::feature_names()); empty means config.features, or the default set.
-    struct SymbolModel
-    {
-        std::shared_ptr<fin::ml::IModel> model;
-        std::vector<std::string> features;
-    };
-
     // Called once per symbol, when its pipeline is created. Returning a null model is allowed:
     // that symbol runs without predictions. A struct rather than a bare std::function alias
     // on purpose: `StreamEngine(cfg, nullptr, &sink)` would otherwise match both constructors.
@@ -48,8 +41,9 @@ namespace fin::stream
      * share a bar or a signal. Every pipeline runs on the calling thread, in tick order, and
      * the sink is shared between them.
      *
-     * The model is chosen per pipeline by a ModelResolver, and so is the feature set: each
-     * pipeline's FeatureBus computes the features its own model was trained on. That matters
+     * The model is chosen per pipeline by a ModelResolver, and so are the feature set, the
+     * indicator periods and the timeframe: each pipeline builds its candles and features the
+     * way its own model was trained. That matters
      * because LinearModel::predict skips names it does not know, so one feature set for models
      * trained on different ones would score some of them on a subset of their weights, silently.
      */
@@ -64,7 +58,10 @@ namespace fin::stream
                               ISignalSink *sink = nullptr);
 
         // A model per symbol. Creating a pipeline throws std::invalid_argument when the
-        // resolved model records a feature set and config.features names a different one.
+        // resolved model records a feature set and config.features names a different one. The
+        // resolved params and timeframe replace config's for that pipeline: whether a config
+        // value was chosen or defaulted is not known here, so contradictions between what the
+        // user typed and what a model file records are caught earlier, by symbol_model_from.
         StreamEngine(StreamConfig config, ModelResolver resolver, ISignalSink *sink = nullptr);
 
         // Pinned in place: last_ points into pipelines_, and a copy or a moved-from engine
