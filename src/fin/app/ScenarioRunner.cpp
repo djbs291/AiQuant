@@ -394,7 +394,6 @@ namespace fin::app
         // Same feature set as training: if these two ever diverged, the backtest would feed the
         // model something it was not trained on.
         fin::indicators::FeatureBus live_bus(feature_names, feature_params);
-        std::optional<double> pending_prediction;
 
         // The deployed copy: it starts where training left off and learns only from candles
         // the training pass never saw.
@@ -409,13 +408,18 @@ namespace fin::app
 
         for (const auto &c : res.candles)
         {
-            bt.on_candle(c, pending_prediction);
-
+            // Each candle is judged with the prediction made from its own features, at its own
+            // close: the forecast of the move to the next close, which is what the model was
+            // trained on and when the backtester trades. The indicator rules are judged on the
+            // same candle. Until 2026-09 the prediction was held back one candle, so the model
+            // voted on a move that had already happened.
+            std::optional<double> prediction;
             if (auto row = live_bus.update(c))
             {
                 // emitted_rows > train_rows means the previous row is past the training split.
                 // Re-learning the training rows here would only be extra passes over data the
-                // model has already fitted.
+                // model has already fitted. The previous row's target is known now, at this
+                // close, so learning from it before predicting this row uses nothing ahead.
                 if (live_model && previous_row && emitted_rows > train_rows)
                 {
                     auto prev_fv = fin::ml::FeatureVector::from_feature_row(*previous_row);
@@ -424,15 +428,12 @@ namespace fin::app
                 }
 
                 auto fv = fin::ml::FeatureVector::from_feature_row(*row);
-                pending_prediction = live_model ? live_model->predict(fv)
-                                                : training_summary.model.predict(fv);
+                prediction = live_model ? live_model->predict(fv) : training_summary.model.predict(fv);
                 previous_row = *row;
                 ++emitted_rows;
             }
-            else
-            {
-                pending_prediction.reset();
-            }
+
+            bt.on_candle(c, prediction);
         }
 
         result.metrics = bt.finalize();

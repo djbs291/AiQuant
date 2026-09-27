@@ -27,8 +27,9 @@ namespace fin::stream
         // Null until every selected indicator is warm — warmup is all-or-nothing.
         const fin::indicators::FeatureRow *row = nullptr;
 
-        // The prediction made on the PREVIOUS candle, which is the one this bar was judged
-        // on. A candle's own prediction applies to the next bar.
+        // The prediction made on this candle, from its own features: the model's forecast of
+        // the move from this close to the next one. This bar was judged with it. Empty during
+        // warmup, without a model, or when the model failed on this bar.
         std::optional<double> prediction;
 
         const fin::signal::Signal &signal;
