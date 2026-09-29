@@ -1,5 +1,7 @@
 #include "catch2_compat.hpp"
 
+#include "TestBacktestHelpers.hpp"
+
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -78,22 +80,13 @@ namespace
                              }};
     }
 
-    fin::backtest::Metrics backtest(const std::vector<Recorded> &events, const fin::app::ScenarioConfig &cfg)
+    backtest_test::SplitMetrics backtest(const std::vector<Recorded> &events, const fin::app::ScenarioConfig &cfg,
+                                         long long split_ms)
     {
-        fin::signal::SignalEngineConfig scfg{};
-        scfg.rsi_buy_below = cfg.rsi_buy;
-        scfg.rsi_sell_above = cfg.rsi_sell;
-        scfg.use_ema_crossover = cfg.use_ema_crossover;
-
-        fin::backtest::BacktestConfig btcfg{};
-        btcfg.ema_fast = cfg.ema_fast;
-        btcfg.ema_slow = cfg.ema_slow;
-        btcfg.rsi_period = cfg.rsi_period;
-
-        fin::backtest::Backtester bt(btcfg, fin::signal::SignalEngine{scfg});
+        std::vector<backtest_test::Bar> bars;
         for (const auto &event : events)
-            bt.on_candle(event.candle, event.prediction);
-        return bt.finalize();
+            bars.emplace_back(event.candle, event.prediction);
+        return backtest_test::split_backtest(bars, cfg, split_ms);
     }
 
     std::size_t first_row(const std::vector<Recorded> &events)
@@ -135,12 +128,8 @@ TEST_CASE("Each symbol predicts with its own model and its own features", "[stre
         // Warmup follows the symbol's own feature set: the two differ here.
         REQUIRE(first_row(events) == trained->result.warmup_candles);
 
-        const auto metrics = backtest(events, trained->cfg);
-        REQUIRE(metrics.trades == trained->result.metrics.trades);
-        REQUIRE(metrics.wins == trained->result.metrics.wins);
-        REQUIRE(metrics.losses == trained->result.metrics.losses);
-        REQUIRE(metrics.final_cash == Approx(trained->result.metrics.final_cash).margin(1e-9));
-        REQUIRE(metrics.max_drawdown == Approx(trained->result.metrics.max_drawdown).margin(1e-9));
+        backtest_test::require_matches(backtest(events, trained->cfg, trained->result.out_of_sample_from_ms),
+                                       trained->result);
 
         // And routing stays invisible: the same events as a stream of that symbol alone.
         fin::io::FileTickSource alone_source(ticks.string());

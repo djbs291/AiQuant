@@ -1,5 +1,7 @@
 #include "catch2_compat.hpp"
 
+#include "TestBacktestHelpers.hpp"
+
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
@@ -107,26 +109,11 @@ TEST_CASE("A routed symbol trades exactly as the batch path does on that symbol"
     const auto abc = events_for(sink.events, "ABC");
     REQUIRE(abc.size() == trained.result.candles);
 
-    fin::signal::SignalEngineConfig scfg{};
-    scfg.rsi_buy_below = trained.cfg.rsi_buy;
-    scfg.rsi_sell_above = trained.cfg.rsi_sell;
-    scfg.use_ema_crossover = trained.cfg.use_ema_crossover;
-
-    fin::backtest::BacktestConfig btcfg{};
-    btcfg.ema_fast = trained.cfg.ema_fast;
-    btcfg.ema_slow = trained.cfg.ema_slow;
-    btcfg.rsi_period = trained.cfg.rsi_period;
-
-    fin::backtest::Backtester bt(btcfg, fin::signal::SignalEngine{scfg});
+    std::vector<backtest_test::Bar> bars;
     for (const auto &event : abc)
-        bt.on_candle(event.candle, event.prediction);
-    const auto metrics = bt.finalize();
-
-    REQUIRE(metrics.trades == trained.result.metrics.trades);
-    REQUIRE(metrics.wins == trained.result.metrics.wins);
-    REQUIRE(metrics.losses == trained.result.metrics.losses);
-    REQUIRE(metrics.final_cash == Approx(trained.result.metrics.final_cash).margin(1e-9));
-    REQUIRE(metrics.max_drawdown == Approx(trained.result.metrics.max_drawdown).margin(1e-9));
+        bars.emplace_back(event.candle, event.prediction);
+    backtest_test::require_matches(
+        backtest_test::split_backtest(bars, trained.cfg, trained.result.out_of_sample_from_ms), trained.result);
 
     std::filesystem::remove(ticks);
 }

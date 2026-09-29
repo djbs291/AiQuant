@@ -1,5 +1,7 @@
 #include "catch2_compat.hpp"
 
+#include "TestBacktestHelpers.hpp"
+
 #include <filesystem>
 #include <optional>
 
@@ -16,7 +18,7 @@ namespace
     // The plainest statement of when a prediction is used, written out without the stream:
     // compute a candle's features, predict from them, judge that same candle. This is the
     // loop `aiquant backtest --model-linear` runs.
-    fin::backtest::Metrics predict_then_judge(const fin::app::ScenarioConfig &cfg,
+    backtest_test::SplitMetrics predict_then_judge(const fin::app::ScenarioConfig &cfg,
                                               const fin::app::ScenarioResult &result)
     {
         const auto candles = fin::io::resample_csv_with_stats(cfg.ticks_path, cfg.timeframe, {}).candles;
@@ -31,24 +33,15 @@ namespace
         params.atr = cfg.atr_period;
         fin::indicators::FeatureBus bus(result.features, params);
 
-        fin::signal::SignalEngineConfig scfg{};
-        scfg.rsi_buy_below = cfg.rsi_buy;
-        scfg.rsi_sell_above = cfg.rsi_sell;
-        scfg.use_ema_crossover = cfg.use_ema_crossover;
-        fin::backtest::BacktestConfig btcfg{};
-        btcfg.ema_fast = cfg.ema_fast;
-        btcfg.ema_slow = cfg.ema_slow;
-        btcfg.rsi_period = cfg.rsi_period;
-        fin::backtest::Backtester bt(btcfg, fin::signal::SignalEngine{scfg});
-
+        std::vector<backtest_test::Bar> bars;
         for (const auto &candle : candles)
         {
             std::optional<double> prediction;
             if (auto row = bus.update(candle))
                 prediction = result.training.model.predict(fin::ml::FeatureVector::from_feature_row(*row));
-            bt.on_candle(candle, prediction);
+            bars.emplace_back(candle, prediction);
         }
-        return bt.finalize();
+        return backtest_test::split_backtest(bars, cfg, result.out_of_sample_from_ms);
     }
 }
 
@@ -69,13 +62,7 @@ TEST_CASE("run_scenario judges each candle with the prediction made on it", "[ap
             cfg.features = {"close", "ema_fast", "rsi", "atr"};
 
         const auto result = fin::app::run_scenario(cfg);
-        const auto expected = predict_then_judge(cfg, result);
-
-        REQUIRE(result.metrics.trades == expected.trades);
-        REQUIRE(result.metrics.wins == expected.wins);
-        REQUIRE(result.metrics.losses == expected.losses);
-        REQUIRE(result.metrics.final_cash == Approx(expected.final_cash).margin(1e-9));
-        REQUIRE(result.metrics.max_drawdown == Approx(expected.max_drawdown).margin(1e-9));
+        backtest_test::require_matches(predict_then_judge(cfg, result), result);
     }
 
     std::filesystem::remove(ticks);
