@@ -21,6 +21,7 @@ namespace fin::app
             out << ",\n    \"trades\": " << result.metrics.trades
                 << ",\n    \"wins\": " << result.metrics.wins
                 << ",\n    \"losses\": " << result.metrics.losses
+                << ",\n    \"model_decisive_signals\": " << result.metrics.model_decisive_signals
                 << ",\n    \"max_drawdown\": ";
             json::write_number(out, result.metrics.max_drawdown);
             out << "\n  },\n";
@@ -49,6 +50,9 @@ namespace fin::app
         }
         out << "],\n";
         out << "  \"model\": " << std::quoted(result.model) << ",\n";
+        out << "  \"model_weight\": ";
+        json::write_number(out, cfg.model_weight);
+        out << ",\n";
         out << "  \"online_update\": " << (result.online_update ? "true" : "false") << ",\n";
         out << "  \"online_updates\": " << result.online_updates << ",\n";
         out << "  \"training_samples\": " << result.training.samples << ",\n";

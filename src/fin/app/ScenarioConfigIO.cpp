@@ -436,6 +436,16 @@ namespace fin::app
                 }
                 cfg.rsi_sell = v;
             }
+            else if (name == "model_weight")
+            {
+                double v = 0.0;
+                if (!parse_double_value(value, v))
+                {
+                    error = "Invalid model_weight at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.model_weight = v;
+            }
             else if (name == "use_ema_crossover")
             {
                 auto b = parse_bool_value(value);

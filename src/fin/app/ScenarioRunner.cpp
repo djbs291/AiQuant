@@ -113,6 +113,7 @@ namespace fin::app
             {"bb_k", config.bb_k},
             {"rsi_buy", config.rsi_buy},
             {"rsi_sell", config.rsi_sell},
+            {"model_weight", config.model_weight},
             {"cash", config.initial_cash.value_or(1.0)},
             {"qty", config.trade_qty.value_or(1.0)},
             {"fee", config.fee_per_trade.value_or(0.0)},
@@ -154,6 +155,13 @@ namespace fin::app
                 error = std::string("Invalid ") + name + ": an RSI threshold lies in [0, 100]";
                 return false;
             }
+        }
+
+        // A negative weight would turn the model into its own contrarian; zero leaves it out.
+        if (config.model_weight < 0.0)
+        {
+            error = "Invalid model_weight: must be >= 0";
+            return false;
         }
 
         // The backtester trusts all three. A negative quantity makes a Buy pay out, so on the
@@ -375,6 +383,7 @@ namespace fin::app
         scfg.rsi_buy_below = config.rsi_buy;
         scfg.rsi_sell_above = config.rsi_sell;
         scfg.use_ema_crossover = config.use_ema_crossover;
+        scfg.model_weight = config.model_weight;
 
         fin::signal::SignalEngine engine{scfg};
 

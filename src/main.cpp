@@ -196,11 +196,26 @@ static std::string describe_model_settings(const fin::ml::LinearModel &model)
     return out.str();
 }
 
+// --model-weight, refused unless finite and >= 0 (run_scenario applies the same rule).
+static bool parse_model_weight(const std::vector<std::string> &args, double &weight)
+{
+    if (auto v = parse_double_flag(args, "--model-weight"))
+    {
+        if (!std::isfinite(*v) || *v < 0.0)
+        {
+            std::cerr << "Invalid --model-weight (must be a finite number >= 0): " << *v << "\n";
+            return false;
+        }
+        weight = *v;
+    }
+    return true;
+}
+
 static int cmd_backtest(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
+        std::cerr << "Usage: aiquant backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--model-weight W] [--candles-out path] [--model-linear path]\n";
         return 2;
     }
 
@@ -277,6 +292,8 @@ static int cmd_backtest(const std::vector<std::string> &args)
         scfg.rsi_sell_above = *v;
     if (flag_present(args, "--no-ema-xover"))
         scfg.use_ema_crossover = false;
+    if (!parse_model_weight(args, scfg.model_weight))
+        return 2;
 
     fin::signal::SignalEngine eng{scfg}; // defaults
     fin::backtest::Backtester bt(cfg, eng);
@@ -311,6 +328,9 @@ static int cmd_backtest(const std::vector<std::string> &args)
     std::cout << "PnL: " << m.pnl << " (" << m.return_pct << "%)\n";
     std::cout << "Max DD: " << m.max_drawdown << "%\n";
     std::cout << "Trades: " << m.trades << ", Wins: " << m.wins << ", Losses: " << m.losses << "\n";
+    if (linear_model)
+        std::cout << "Signals decided by the model: " << m.model_decisive_signals
+                  << " (model weight " << scfg.model_weight << ")\n";
 
     // Optional: export resampled candles to CSV
     if (auto outp = parse_string_flag(args, "--candles-out"))
@@ -509,6 +529,8 @@ static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin
     os << "PnL: " << result.metrics.pnl << " (" << result.metrics.return_pct << "%)\n";
     os << "Trades: " << result.metrics.trades << " (Wins: " << result.metrics.wins
               << ", Losses: " << result.metrics.losses << ")\n";
+    os << "Signals decided by the model: " << result.metrics.model_decisive_signals
+       << " (model weight " << cfg.model_weight << ")\n";
     os << "Max DD: " << result.metrics.max_drawdown << "%\n";
     if (result.model_saved && cfg.model_output_path)
         os << "Saved model: " << *cfg.model_output_path << "\n";
@@ -518,7 +540,7 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--symbol SYM] [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--model ridge|sgd] [--sgd-lr N] [--sgd-l2 N] [--sgd-epochs N] [--sgd-power-t N] [--no-sgd-standardize] [--online] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
+        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--symbol SYM] [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--model ridge|sgd] [--sgd-lr N] [--sgd-l2 N] [--sgd-epochs N] [--sgd-power-t N] [--no-sgd-standardize] [--online] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--model-weight W] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
         return 2;
     }
 
@@ -591,6 +613,8 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
         cfg.rsi_sell = *v_alt;
 
     cfg.use_ema_crossover = !flag_present(args, "--no-ema-xover");
+    if (auto v = parse_double_flag(args, "--model-weight"))
+        cfg.model_weight = *v; // run_scenario validates it
 
     if (auto v = parse_double_flag(args, "--cash"))
         cfg.initial_cash = *v;
@@ -713,7 +737,7 @@ static int cmd_stream(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant stream <ticks.csv> [--tf S1|S5|M1|M5|H1] [--model-linear path] [--features a,b,c] [--symbol SYM | --per-symbol [--model-dir DIR]] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--all] [--limit N]\n";
+        std::cerr << "Usage: aiquant stream <ticks.csv> [--tf S1|S5|M1|M5|H1] [--model-linear path] [--features a,b,c] [--symbol SYM | --per-symbol [--model-dir DIR]] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--model-weight W] [--all] [--limit N]\n";
         return 2;
     }
 
@@ -743,6 +767,8 @@ static int cmd_stream(const std::vector<std::string> &args)
     if (auto v = parse_double_flag(args, "--rsi-sell"))
         cfg.signal.rsi_sell_above = *v;
     cfg.signal.use_ema_crossover = !flag_present(args, "--no-ema-xover");
+    if (!parse_model_weight(args, cfg.signal.model_weight))
+        return 2;
 
     const bool per_symbol = flag_present(args, "--per-symbol");
     if (auto symbol = parse_string_flag(args, "--symbol"))
@@ -899,6 +925,8 @@ static int cmd_stream(const std::vector<std::string> &args)
     std::cerr << "\n";
     std::cerr << "Signals: " << stats.signals << " (Buy " << stats.buys << ", Sell " << stats.sells
               << ", Hold " << stats.holds << ") - printed " << sink.printed() << "\n";
+    std::cerr << "Signals decided by the model: " << stats.model_decisive << " (model weight "
+              << cfg.signal.model_weight << ")\n";
     return 0;
 }
 
@@ -909,7 +937,7 @@ int main(int argc, char **argv)
     {
         std::cout << "AiQuant CLI (MVP)\n";
         std::cout << "Commands: \n";
-        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--candles-out path] [--model-linear path]\n";
+        std::cout << "  backtest <ticks.csv> [--tf S1|S5|M1|M5|H1] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N] [--rsi-sell N] [--no-ema-xover] [--model-weight W] [--candles-out path] [--model-linear path]\n";
         std::cout << "  features <ticks.csv> [--tf S1|S5|M1|M5|H1] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N]\n";
         std::cout << "    Resample candles and run RSI+EMA strategy\n";
         std::cout << "  train-linear <ticks.csv> [--tf ...] [--ema-fast N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--out path]\n";
