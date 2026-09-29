@@ -29,7 +29,9 @@ def show(title, result):
           f"{result['feature_rows']} feature rows)")
     print(f"  val RMSE : {result['validation_rmse']:.6f}")
     print(f"  trades   : {metrics['trades']} ({metrics['wins']}W / {metrics['losses']}L), "
-          f"PnL {metrics['pnl']:.4f}")
+          f"PnL {metrics['pnl']:.4f}  (out of sample, {result['out_of_sample_candles']} candles)")
+    print(f"  in sample: PnL {result['metrics_in_sample']['pnl']:.4f} over the "
+          f"{result['in_sample_candles']} candles up to the training split, for comparison")
 
 
 def main():

@@ -23,7 +23,7 @@ key = value  # optional inline comment
 | `ticks`, `ticks_path`, `data` | string | **required** | CSV with raw ticks. Relative paths are resolved from the working directory. |
 | `symbol` | string | the first tick's symbol | Which instrument to take out of the file. Ticks for any other symbol are skipped and counted, never merged into the same bar. Case-sensitive, unlike the keys. See below. |
 | `tf`, `timeframe` | enum | `M1` | One of `S1`, `S5`, `M1`, `M5`, `H1`. |
-| `train_ratio` | double | `0.7` | Clamped to `[0.1, 0.95]`. |
+| `train_ratio` | double | `0.7` | Clamped to `[0.1, 0.95]`. Also where the backtest splits: `metrics` covers only the candles after the training rows, and `metrics_in_sample` the ones up to them. |
 | `ridge`, `ridge_lambda` | double | `1e-6` | Ridge regularization term for linear model. |
 | `ema_fast` | size_t | `12` | Fast EMA window (candles). |
 | `ema_slow` | size_t | `26` | Slow EMA window. |
