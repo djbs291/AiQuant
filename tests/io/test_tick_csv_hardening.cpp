@@ -69,6 +69,9 @@ TEST_CASE("An unopenable file reports why rather than reading as empty", "[io][c
 
     REQUIRE(outcome.ticks.empty());
     REQUIRE(outcome.error.find("open") != std::string::npos);
+    // And names the file: the path used to be moved away before the message was built, so
+    // it read "could not open tick file: " and nothing else.
+    REQUIRE(outcome.error.find(missing.string()) != std::string::npos);
 }
 
 TEST_CASE("Numbers with trailing junk are rejected, not truncated", "[io][csv]")

@@ -23,6 +23,9 @@ namespace fin::signal
         SignalType type = SignalType::Hold;
         double score = 0.0;    // positive -> buy bias; negative -> sell bias
         std::string source;    // short reason/strategy name
+        // True when the model's vote changed the outcome: the indicator rules alone would
+        // have given a different type. The measure of how much the model actually matters.
+        bool model_decisive = false;
     };
 }
 

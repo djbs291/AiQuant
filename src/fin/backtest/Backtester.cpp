@@ -17,6 +17,7 @@ namespace fin::backtest
     void Backtester::reset()
     {
         cash_ = cfg_.initial_cash;
+        model_decisive_ = 0;
         qty_ = 0.0;
         last_close_ = 0.0;
         entry_price_ = 0.0;
@@ -103,6 +104,8 @@ namespace fin::backtest
         snap.rsi = r;
 
         Signal sig = engine_.eval(snap, prediction);
+        if (sig.model_decisive)
+            ++model_decisive_;
         apply_signal(c, sig);
         update_drawdown(c);
     }
@@ -135,6 +138,7 @@ namespace fin::backtest
         m.pnl = cash_ - cfg_.initial_cash;
         m.return_pct = (cfg_.initial_cash > 0.0) ? (m.pnl / cfg_.initial_cash * 100.0) : 0.0;
         m.trades = static_cast<int>(trades_.size());
+        m.model_decisive_signals = model_decisive_;
         m.max_drawdown = max_drawdown_pct_;
         for (const auto &t : trades_)
         {

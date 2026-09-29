@@ -218,6 +218,7 @@ namespace
         if (!set_double(dict, "rsi_buy", cfg.rsi_buy, error)) return false;
         if (!set_double(dict, "rsi_sell", cfg.rsi_sell, error)) return false;
         if (!set_bool(dict, "use_ema_crossover", cfg.use_ema_crossover, error)) return false;
+        if (!set_double(dict, "model_weight", cfg.model_weight, error)) return false;
         if (!set_optional_double(dict, "initial_cash", cfg.initial_cash, error)) return false;
         if (!set_optional_double(dict, "trade_qty", cfg.trade_qty, error)) return false;
         if (!set_optional_double(dict, "fee_per_trade", cfg.fee_per_trade, error)) return false;
@@ -308,6 +309,7 @@ namespace
         metrics["trades"] = result.metrics.trades;
         metrics["wins"] = result.metrics.wins;
         metrics["losses"] = result.metrics.losses;
+        metrics["model_decisive_signals"] = result.metrics.model_decisive_signals;
         metrics["max_drawdown"] = result.metrics.max_drawdown;
         root["metrics"] = std::move(metrics);
 
@@ -348,6 +350,7 @@ namespace
         dict["rsi_buy"] = cfg.rsi_buy;
         dict["rsi_sell"] = cfg.rsi_sell;
         dict["use_ema_crossover"] = cfg.use_ema_crossover;
+        dict["model_weight"] = cfg.model_weight;
         if (cfg.initial_cash)
             dict["initial_cash"] = *cfg.initial_cash;
         if (cfg.trade_qty)

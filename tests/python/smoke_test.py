@@ -37,7 +37,8 @@ def check_result(res):
     assert res["feature_rows"] >= 3, res["feature_rows"]
     assert res["training_samples"] > 0
     assert math.isfinite(res["validation_rmse"])
-    for key in ("final_cash", "pnl", "return_pct", "trades", "wins", "losses", "max_drawdown"):
+    for key in ("final_cash", "pnl", "return_pct", "trades", "wins", "losses", "max_drawdown",
+                "model_decisive_signals"):
         assert key in res["metrics"], key
 
 

@@ -233,6 +233,26 @@ TEST_CASE("A '#' starts a comment only after whitespace", "[scenario][config]")
     std::filesystem::remove(path);
 }
 
+TEST_CASE("model_weight loads, and only as a finite number >= 0", "[scenario][config]")
+{
+    auto path = scenario_test::write_temp_config("ticks = data.csv\nmodel_weight = 1.5\n");
+    fin::app::ScenarioConfig cfg{};
+    std::string error;
+    REQUIRE(fin::app::load_scenario_file(path.string(), cfg, error));
+    REQUIRE(cfg.model_weight == Approx(1.5));
+    std::filesystem::remove(path);
+
+    for (const char *bad : {"model_weight = -1", "model_weight = nan", "model_weight = 1x"})
+    {
+        path = scenario_test::write_temp_config(std::string("ticks = data.csv\n") + bad + "\n");
+        fin::app::ScenarioConfig refused{};
+        error.clear();
+        REQUIRE_FALSE(fin::app::load_scenario_file(path.string(), refused, error));
+        REQUIRE(error.find("model_weight") != std::string::npos);
+        std::filesystem::remove(path);
+    }
+}
+
 TEST_CASE("The scenarios shipped in the repo still load", "[scenario][config]")
 {
     // Rejecting unknown keys is a behaviour change, so the files the project ships are the

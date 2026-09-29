@@ -193,10 +193,11 @@ These two take a **JSON object** (the scenario endpoints keep taking INI) and an
 
 ```json
 {"close": 100.0, "rsi": 20.0, "ema_fast": 11.0, "ema_slow": 10.0,
- "prediction": 0.5, "rsi_buy": 30.0, "rsi_sell": 70.0, "use_ema_crossover": true}
+ "prediction": 0.5, "rsi_buy": 30.0, "rsi_sell": 70.0, "use_ema_crossover": true,
+ "model_weight": 0.5}
 ```
 
-Every field is optional. Supply `prediction` to evaluate the rules against a number you already have, or supply `features` (plus `model`) and the service predicts first. With neither, it answers on the indicator rules alone. The reply carries `signal` (`Buy`/`Sell`/`Hold`), `score`, `reason`, `symbol`, `prediction` (or `null`) and `features`.
+Every field is optional. Supply `prediction` to evaluate the rules against a number you already have, or supply `features` (plus `model`) and the service predicts first. With neither, it answers on the indicator rules alone. `model_weight` (default `0.5`, must be `>= 0`) is what the prediction's vote is worth against `1` for each rule. The reply carries `signal` (`Buy`/`Sell`/`Hold`), `score`, `reason`, `model_decisive` (whether the model's vote changed the outcome), `symbol`, `prediction` (or `null`) and `features`.
 
 `POST /run-file` takes a path to a scenario file; it is resolved against `--root` (default: the working directory) and anything outside that directory is refused. `POST /run-config` accepts raw INI contents and executes them via a temporary file. Both return the JSON emitted by the CLI `--json` flag.
 

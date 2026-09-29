@@ -11,6 +11,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstring>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -737,8 +738,10 @@ namespace
 
         std::optional<double> rsi_buy;
         std::optional<double> rsi_sell;
+        std::optional<double> model_weight;
         if (!read_optional_number(root, "rsi_buy", rsi_buy, error) ||
             !read_optional_number(root, "rsi_sell", rsi_sell, error) ||
+            !read_optional_number(root, "model_weight", model_weight, error) ||
             !read_optional_string(root, "symbol", request.symbol, error) ||
             !read_optional_bool(root, "use_ema_crossover", request.engine.use_ema_crossover, error))
         {
@@ -754,6 +757,15 @@ namespace
             request.engine.rsi_buy_below = *rsi_buy;
         if (rsi_sell)
             request.engine.rsi_sell_above = *rsi_sell;
+        if (model_weight)
+        {
+            if (!(*model_weight >= 0.0) || !std::isfinite(*model_weight))
+            {
+                send_response(client, 400, "Bad Request", json_error("model_weight must be a finite number >= 0"));
+                return;
+            }
+            request.engine.model_weight = *model_weight;
+        }
 
         const auto response = predictor.signal(request);
 
@@ -762,6 +774,7 @@ namespace
             << "  \"score\": ";
         fin::app::json::write_number(out, response.signal.score);
         out << ",\n  \"reason\": " << std::quoted(response.signal.source) << ",\n"
+            << "  \"model_decisive\": " << (response.signal.model_decisive ? "true" : "false") << ",\n"
             << "  \"symbol\": " << std::quoted(response.signal.symbol) << ",\n"
             << "  \"prediction\": ";
         if (response.prediction)

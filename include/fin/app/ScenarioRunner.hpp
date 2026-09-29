@@ -62,6 +62,9 @@ namespace fin::app
         double rsi_buy = 30.0;
         double rsi_sell = 70.0;
         bool use_ema_crossover = true;
+        // The model's vote in the signal, against 1 per indicator rule (see
+        // SignalEngineConfig::model_weight). 0.5 is the historical value.
+        double model_weight = 0.5;
 
         std::optional<double> initial_cash;
         std::optional<double> trade_qty;

@@ -11,7 +11,7 @@ namespace fin::stream
         // Field by field, so a counter added to StreamStats has to be added here too, or the
         // routed totals would silently leave it at zero. The assert turns forgetting into a
         // compile error: update the count once the new field is summed below.
-        static_assert(sizeof(StreamStats) == 11 * sizeof(std::size_t),
+        static_assert(sizeof(StreamStats) == 12 * sizeof(std::size_t),
                       "StreamStats changed: add the new counter to accumulate()");
 
         void accumulate(StreamStats &total, const StreamStats &part)
@@ -27,6 +27,7 @@ namespace fin::stream
             total.buys += part.buys;
             total.sells += part.sells;
             total.holds += part.holds;
+            total.model_decisive += part.model_decisive;
         }
     } // namespace
 
