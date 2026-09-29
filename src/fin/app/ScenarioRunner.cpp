@@ -398,7 +398,13 @@ namespace fin::app
         btcfg.ema_slow = config.ema_slow;
         btcfg.rsi_period = config.rsi_period;
 
-        fin::backtest::Backtester bt(btcfg, engine);
+        // Two backtesters over one replay. Until 2026-09 there was one, over every candle, so
+        // about train_ratio of each reported trade, PnL and drawdown came from candles the model
+        // had been fitted to. `in_sample` trades up to the split; `out_of_sample` only watches
+        // until then, so its indicators are warm, and trades from the first validation row on.
+        fin::backtest::Backtester in_sample(btcfg, engine);
+        fin::backtest::Backtester out_of_sample(btcfg, engine);
+        bool past_split = false;
 
         // Same feature set as training: if these two ever diverged, the backtest would feed the
         // model something it was not trained on.
@@ -425,6 +431,15 @@ namespace fin::app
             std::optional<double> prediction;
             if (auto row = live_bus.update(c))
             {
+                // The first validation row -- the first one the model was not trained on --
+                // opens the out-of-sample stretch, and every candle after it belongs there.
+                if (emitted_rows >= train_rows && !past_split)
+                {
+                    past_split = true;
+                    result.out_of_sample_from_ms =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(c.start_time().time_since_epoch()).count();
+                }
+
                 // emitted_rows > train_rows means the previous row is past the training split.
                 // Re-learning the training rows here would only be extra passes over data the
                 // model has already fitted. The previous row's target is known now, at this
@@ -442,10 +457,21 @@ namespace fin::app
                 ++emitted_rows;
             }
 
-            bt.on_candle(c, prediction);
+            if (past_split)
+            {
+                out_of_sample.on_candle(c, prediction);
+                ++result.out_of_sample_candles;
+            }
+            else
+            {
+                in_sample.on_candle(c, prediction);
+                out_of_sample.observe(c);
+                ++result.in_sample_candles;
+            }
         }
 
-        result.metrics = bt.finalize();
+        result.metrics = out_of_sample.finalize();
+        result.metrics_in_sample = in_sample.finalize();
         return result;
     }
 }

@@ -57,6 +57,11 @@ namespace fin::backtest
         // Feed one candle; applies strategy and updates positions
         void on_candle(const fin::core::Candle &c, std::optional<double> prediction = std::nullopt);
 
+        // Feed one candle to the indicators only: no signal, no trade, no equity. For the stretch
+        // before an out-of-sample backtest starts, so its EMA and RSI are warm on its first
+        // candle exactly as they would be in a run over the whole series.
+        void observe(const fin::core::Candle &c);
+
         // Close any open position at last price and compute metrics
         Metrics finalize();
 

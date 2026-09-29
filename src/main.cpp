@@ -525,13 +525,22 @@ static void print_scenario_result(const fin::app::ScenarioConfig &cfg, const fin
             os << " " << row.ts_ms << ", " << row.predicted_delta << ", " << row.actual_delta << "\n";
     }
 
-    os << "Backtest final cash: " << result.metrics.final_cash << "\n";
-    os << "PnL: " << result.metrics.pnl << " (" << result.metrics.return_pct << "%)\n";
-    os << "Trades: " << result.metrics.trades << " (Wins: " << result.metrics.wins
-              << ", Losses: " << result.metrics.losses << ")\n";
-    os << "Signals decided by the model: " << result.metrics.model_decisive_signals
-       << " (model weight " << cfg.model_weight << ")\n";
-    os << "Max DD: " << result.metrics.max_drawdown << "%\n";
+    // Out of sample first: it is the figure that means something. The training stretch
+    // follows for comparison, labelled so it is never read as the result.
+    const auto print_metrics = [&os](const fin::backtest::Metrics &m)
+    {
+        os << "  Final cash: " << m.final_cash << "\n";
+        os << "  PnL: " << m.pnl << " (" << m.return_pct << "%)\n";
+        os << "  Trades: " << m.trades << " (Wins: " << m.wins << ", Losses: " << m.losses << ")\n";
+        os << "  Signals decided by the model: " << m.model_decisive_signals << "\n";
+        os << "  Max DD: " << m.max_drawdown << "%\n";
+    };
+    os << "Backtest, out of sample (" << result.out_of_sample_candles << " candles from "
+       << result.out_of_sample_from_ms << ", model weight " << cfg.model_weight << "):\n";
+    print_metrics(result.metrics);
+    os << "Backtest, in sample (" << result.in_sample_candles
+       << " candles up to the training split, warmup included; for comparison only):\n";
+    print_metrics(result.metrics_in_sample);
     if (result.model_saved && cfg.model_output_path)
         os << "Saved model: " << *cfg.model_output_path << "\n";
 }

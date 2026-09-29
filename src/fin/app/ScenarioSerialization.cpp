@@ -10,20 +10,20 @@ namespace fin::app
 {
     namespace
     {
-        void append_metrics_json(std::ostream &out, const ScenarioResult &result)
+        void append_metrics_json(std::ostream &out, const char *key, const fin::backtest::Metrics &metrics)
         {
-            out << "  \"metrics\": {\n    \"final_cash\": ";
-            json::write_number(out, result.metrics.final_cash);
+            out << "  \"" << key << "\": {\n    \"final_cash\": ";
+            json::write_number(out, metrics.final_cash);
             out << ",\n    \"pnl\": ";
-            json::write_number(out, result.metrics.pnl);
+            json::write_number(out, metrics.pnl);
             out << ",\n    \"return_pct\": ";
-            json::write_number(out, result.metrics.return_pct);
-            out << ",\n    \"trades\": " << result.metrics.trades
-                << ",\n    \"wins\": " << result.metrics.wins
-                << ",\n    \"losses\": " << result.metrics.losses
-                << ",\n    \"model_decisive_signals\": " << result.metrics.model_decisive_signals
+            json::write_number(out, metrics.return_pct);
+            out << ",\n    \"trades\": " << metrics.trades
+                << ",\n    \"wins\": " << metrics.wins
+                << ",\n    \"losses\": " << metrics.losses
+                << ",\n    \"model_decisive_signals\": " << metrics.model_decisive_signals
                 << ",\n    \"max_drawdown\": ";
-            json::write_number(out, result.metrics.max_drawdown);
+            json::write_number(out, metrics.max_drawdown);
             out << "\n  },\n";
         }
     }
@@ -69,7 +69,13 @@ namespace fin::app
         out << "  \"online_validation_rmse\": ";
         json::write_number(out, result.online_validation_rmse);
         out << ",\n";
-        append_metrics_json(out, result);
+        // "metrics" covers only the candles the model was not trained on; the training stretch
+        // is reported beside it, never folded in.
+        out << "  \"in_sample_candles\": " << result.in_sample_candles << ",\n";
+        out << "  \"out_of_sample_candles\": " << result.out_of_sample_candles << ",\n";
+        out << "  \"out_of_sample_from_ms\": " << result.out_of_sample_from_ms << ",\n";
+        append_metrics_json(out, "metrics", result.metrics);
+        append_metrics_json(out, "metrics_in_sample", result.metrics_in_sample);
         out << "  \"model_saved\": " << (result.model_saved ? "true" : "false") << ",\n";
         out << "  \"validation_preview\": [\n";
         for (std::size_t i = 0; i < result.validation_preview.size(); ++i)

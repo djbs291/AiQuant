@@ -110,6 +110,13 @@ namespace fin::backtest
         update_drawdown(c);
     }
 
+    void Backtester::observe(const Candle &c)
+    {
+        ema_fast_.update(c);
+        ema_slow_.update(c);
+        rsi_.update(c);
+    }
+
     Metrics Backtester::finalize()
     {
         if (qty_ > 0.0 && last_close_ > 0.0)
