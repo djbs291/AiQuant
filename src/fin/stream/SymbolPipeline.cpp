@@ -100,6 +100,8 @@ namespace fin::stream
         //    model voted on a move that had already happened by the time it was traded on.
         const fin::signal::Signal signal = engine_.eval(snapshot, prediction);
         ++stats_.signals;
+        if (signal.model_decisive)
+            ++stats_.model_decisive;
         switch (signal.type)
         {
         case fin::signal::SignalType::Buy:

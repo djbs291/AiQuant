@@ -37,17 +37,20 @@ namespace fin::signal
             }
         }
 
-        // Prediction contribution (sign only)
-        if (prediction.has_value())
+        // What the rules alone decide, kept to tell whether the model changed anything.
+        const double rules_score = score;
+
+        // Prediction contribution (sign only), worth model_weight against 1 per rule.
+        if (prediction.has_value() && cfg_.model_weight > 0.0)
         {
             if (*prediction > 0)
             {
-                score += 0.5; // smaller weight for model by default
+                score += cfg_.model_weight;
                 reason += "ML+ ";
             }
             else if (*prediction < 0)
             {
-                score -= 0.5;
+                score -= cfg_.model_weight;
                 reason += "ML- ";
             }
         }
@@ -57,7 +60,10 @@ namespace fin::signal
         out.symbol = snap.symbol;
         out.score = score;
         out.source = reason.empty() ? std::string{"rules"} : reason;
-        out.type = (score > 0.0) ? SignalType::Buy : (score < 0.0 ? SignalType::Sell : SignalType::Hold);
+        const auto type_of = [](double value)
+        { return (value > 0.0) ? SignalType::Buy : (value < 0.0 ? SignalType::Sell : SignalType::Hold); };
+        out.type = type_of(score);
+        out.model_decisive = out.type != type_of(rules_score);
         return out;
     }
 }

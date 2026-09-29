@@ -41,6 +41,10 @@ namespace fin::backtest
         int trades = 0;
         int wins = 0;
         int losses = 0;
+        // Signals whose type the model's vote decided (Signal::model_decisive). Not trades: a
+        // decided Buy while already long changes nothing, so this bounds the model's influence
+        // from above rather than measuring its effect on the PnL.
+        int model_decisive_signals = 0;
     };
 
     class Backtester
@@ -65,6 +69,7 @@ namespace fin::backtest
         // State
         double cash_ = 0.0;
         double qty_ = 0.0; // position size (long-only)
+        int model_decisive_ = 0;
         double last_close_ = 0.0;
         fin::core::Timestamp last_ts_{};
         double entry_price_ = 0.0;

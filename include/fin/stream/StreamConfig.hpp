@@ -55,6 +55,8 @@ namespace fin::stream
         std::size_t buys = 0;
         std::size_t sells = 0;
         std::size_t holds = 0;
+        // Signals whose type the model's vote decided (Signal::model_decisive).
+        std::size_t model_decisive = 0;
     };
 
 } // namespace fin::stream
