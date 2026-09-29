@@ -424,6 +424,20 @@ def main():
             assert abs(payload["prediction"] - 9.5) < 1e-9, payload
             assert payload["features"] == ["close", "rsi"], payload
 
+            # model_weight moves the model's vote against the rules, and the reply says whether
+            # the model decided the outcome. RSI neutral, EMA bullish (+1), prediction negative.
+            one_rule = {"close": 100.0, "rsi": 50.0, "ema_fast": 11.0, "ema_slow": 10.0, "prediction": -1.0}
+            status, body = request(port, "POST", "/signal", json.dumps(one_rule))
+            payload = json.loads(body)
+            check("POST /signal (default weight keeps the rule)", payload["signal"], "Buy")
+            assert payload["model_decisive"] is False, payload
+            status, body = request(port, "POST", "/signal", json.dumps(dict(one_rule, model_weight=1.5)))
+            payload = json.loads(body)
+            check("POST /signal (model_weight 1.5 overrules it)", payload["signal"], "Sell")
+            assert payload["model_decisive"] is True, payload
+            status, _ = request(port, "POST", "/signal", json.dumps(dict(one_rule, model_weight=-1)))
+            check("POST /signal (negative model_weight)", status, 400)
+
             # /signal with no model and no prediction still evaluates the rules.
             status, body = request(port, "POST", "/signal", json.dumps({"close": 100.0, "rsi": 80.0}))
             check("POST /signal (rules only)", status, 200)

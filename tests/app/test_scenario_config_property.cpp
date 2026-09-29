@@ -49,6 +49,9 @@ namespace
         REQUIRE(cfg.rsi_sell >= 0.0);
         REQUIRE(cfg.rsi_sell <= 100.0);
 
+        REQUIRE(std::isfinite(cfg.model_weight));
+        REQUIRE(cfg.model_weight >= 0.0);
+
         if (cfg.initial_cash)
         {
             REQUIRE(std::isfinite(*cfg.initial_cash));
@@ -129,7 +132,7 @@ TEST_CASE("Randomized scenario files never break the loader's guarantees",
         "sgd_power_t", "sgd_standardize", "online_update", "online", "ema_fast", "ema_slow",
         "rsi", "macd_fast", "macd_slow", "macd_signal", "features", "sma", "sma_period",
         "bb_period", "bb_k", "atr", "adx", "stoch_k", "stoch_d", "zscore", "momentum",
-        "rsi_buy", "rsi_sell", "use_ema_crossover", "no_ema_xover", "cash", "initial_cash",
+        "rsi_buy", "rsi_sell", "model_weight", "use_ema_crossover", "no_ema_xover", "cash", "initial_cash",
         "qty", "trade_qty", "fee", "fee_per_trade", "model_out", "preview",
         "RSI_BUY", "Qty", "rsi_peroid", "", "  "};
     const std::vector<std::string> values = {

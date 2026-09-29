@@ -109,5 +109,10 @@ TEST_CASE("The streaming path matches the batch path bar for bar", "[stream][bat
     REQUIRE(metrics.return_pct == Approx(result.metrics.return_pct).margin(1e-9));
     REQUIRE(metrics.max_drawdown == Approx(result.metrics.max_drawdown).margin(1e-9));
 
+    // The two paths also agree on how many signals the model decided, counted independently:
+    // by the stream's pipeline, by the batch's backtester, and by the one above.
+    REQUIRE(stats.model_decisive == static_cast<std::size_t>(result.metrics.model_decisive_signals));
+    REQUIRE(metrics.model_decisive_signals == result.metrics.model_decisive_signals);
+
     std::filesystem::remove(ticks);
 }

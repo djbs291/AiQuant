@@ -177,6 +177,7 @@ TEST_CASE("Routed counters add up, symbol by symbol", "[stream][route]")
         sum.buys += s.buys;
         sum.sells += s.sells;
         sum.holds += s.holds;
+        sum.model_decisive += s.model_decisive;
     }
     REQUIRE(total.ticks == 15);
     REQUIRE(total.ticks == sum.ticks);
@@ -189,6 +190,7 @@ TEST_CASE("Routed counters add up, symbol by symbol", "[stream][route]")
     REQUIRE(total.buys == sum.buys);
     REQUIRE(total.sells == sum.sells);
     REQUIRE(total.holds == sum.holds);
+    REQUIRE(total.model_decisive == sum.model_decisive);
     REQUIRE(total.ticks_other_symbol == 0); // routing drops nothing
 
     // flush() closed one partial bar per symbol, in the same first-appearance order.
