@@ -34,6 +34,7 @@ key = value  # optional inline comment
 | `rsi_buy` | double | `30.0` | RSI threshold to buy (<=). |
 | `rsi_sell` | double | `70.0` | RSI threshold to sell (>=). |
 | `use_ema_crossover` | bool | `true` | Accepts `true/false`, `1/0`, `yes/no`, `on/off`. |
+| `model_weight` | double | `0.5` | The model's vote in a signal, against `1` for each indicator rule (RSI, EMA crossover). At `0.5` it only breaks a tie between the rules; above `1` it can overrule one, above `2` both. `0` leaves the model out of the decision. Must be finite and `>= 0`. The JSON reports it, and `metrics.model_decisive_signals` counts the signals whose type the model's vote decided. |
 | `no_ema_xover` | bool | — | Inverse toggle; `true` disables EMA crossover checks. |
 | `cash`, `initial_cash` | double | engine default | Starting account cash. |
 | `qty`, `trade_qty` | double | engine default | Quantity per trade. |
@@ -153,6 +154,7 @@ anything:
   zero trades, because buying a negative quantity pays out, and `fee = -1000` turned 18
   trades into 18 wins.
 - **`rsi_buy` and `rsi_sell` must lie in `[0, 100]`**, the range an RSI can take.
+- **`model_weight` must be `>= 0`.** A negative weight would make the model its own contrarian.
 - **The `sgd_*` options are checked even when `model = ridge`:** `sgd_learning_rate > 0`,
   `sgd_l2 >= 0`, `sgd_power_t >= 0`, `sgd_epochs >= 1`. A scenario that carries a bad value
   it does not use is still carrying a mistake.
