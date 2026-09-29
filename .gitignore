@@ -5,5 +5,8 @@ build-cov/
 # Ignore VSCode settings
 .vscode/
 
+# macOS Finder metadata
+.DS_Store
+
 # Test fixtures written by older test runs (tests now use the system temp dir)
 /ticks_*.csv

@@ -83,8 +83,10 @@ namespace fin::io
     };
 
     FileTickSource::FileTickSource(std::string path, TickCsvOptions opt)
-        : impl_(std::make_unique<Impl>(std::move(path), opt))
+        : impl_(std::make_unique<Impl>(path, opt))
     {
+        // `path` is read here, so it is copied into Impl rather than moved: it used to be
+        // moved first, and the message named an empty string.
         if (!impl_->in)
             error_ = "could not open tick file: " + path;
     }
