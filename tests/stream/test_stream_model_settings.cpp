@@ -1,5 +1,7 @@
 #include "catch2_compat.hpp"
 
+#include "TestBacktestHelpers.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -96,23 +98,10 @@ TEST_CASE("A stream on a model's recorded settings matches the batch run that tr
     REQUIRE(stats.candles == result.candles);
     REQUIRE(stats.feature_rows == result.feature_rows);
 
-    fin::signal::SignalEngineConfig scfg{};
-    scfg.rsi_buy_below = cfg.rsi_buy;
-    scfg.rsi_sell_above = cfg.rsi_sell;
-    scfg.use_ema_crossover = cfg.use_ema_crossover;
-    fin::backtest::BacktestConfig btcfg{};
-    btcfg.ema_fast = cfg.ema_fast;
-    btcfg.ema_slow = cfg.ema_slow;
-    btcfg.rsi_period = cfg.rsi_period;
-    fin::backtest::Backtester bt(btcfg, fin::signal::SignalEngine{scfg});
+    std::vector<backtest_test::Bar> bars;
     for (const auto &event : sink.events)
-        bt.on_candle(event.candle, event.prediction);
-    const auto metrics = bt.finalize();
-
-    REQUIRE(metrics.trades == result.metrics.trades);
-    REQUIRE(metrics.wins == result.metrics.wins);
-    REQUIRE(metrics.losses == result.metrics.losses);
-    REQUIRE(metrics.final_cash == Approx(result.metrics.final_cash).margin(1e-9));
+        bars.emplace_back(event.candle, event.prediction);
+    backtest_test::require_matches(backtest_test::split_backtest(bars, cfg, result.out_of_sample_from_ms), result);
 
     std::filesystem::remove(ticks);
 }

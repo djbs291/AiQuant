@@ -302,16 +302,25 @@ namespace
         root["online_validation_rmse"] = result.online_validation_rmse;
         root["model_saved"] = result.model_saved;
 
-        py::dict metrics;
-        metrics["final_cash"] = result.metrics.final_cash;
-        metrics["pnl"] = result.metrics.pnl;
-        metrics["return_pct"] = result.metrics.return_pct;
-        metrics["trades"] = result.metrics.trades;
-        metrics["wins"] = result.metrics.wins;
-        metrics["losses"] = result.metrics.losses;
-        metrics["model_decisive_signals"] = result.metrics.model_decisive_signals;
-        metrics["max_drawdown"] = result.metrics.max_drawdown;
-        root["metrics"] = std::move(metrics);
+        // "metrics" is the out-of-sample backtest; "metrics_in_sample" the training stretch.
+        const auto to_dict = [](const fin::backtest::Metrics &m)
+        {
+            py::dict metrics;
+            metrics["final_cash"] = m.final_cash;
+            metrics["pnl"] = m.pnl;
+            metrics["return_pct"] = m.return_pct;
+            metrics["trades"] = m.trades;
+            metrics["wins"] = m.wins;
+            metrics["losses"] = m.losses;
+            metrics["model_decisive_signals"] = m.model_decisive_signals;
+            metrics["max_drawdown"] = m.max_drawdown;
+            return metrics;
+        };
+        root["metrics"] = to_dict(result.metrics);
+        root["metrics_in_sample"] = to_dict(result.metrics_in_sample);
+        root["in_sample_candles"] = result.in_sample_candles;
+        root["out_of_sample_candles"] = result.out_of_sample_candles;
+        root["out_of_sample_from_ms"] = result.out_of_sample_from_ms;
 
         py::list preview;
         for (const auto &row : result.validation_preview)

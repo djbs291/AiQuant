@@ -95,9 +95,12 @@ $("run-scenario").addEventListener("click", () => {
       ["candles", `${result.candles} (warmup ${result.warmup_candles})`],
       ["feature rows", result.feature_rows],
       ["validation RMSE", number(result.validation_rmse, 6)],
+      // "metrics" covers only the candles the model was not trained on.
+      ["out of sample", `${result.out_of_sample_candles} candles`],
       ["trades", `${result.metrics.trades} (${result.metrics.wins}W / ${result.metrics.losses}L)`],
       ["PnL", `${number(result.metrics.pnl)} (${number(result.metrics.return_pct, 6)}%)`],
       ["max drawdown", `${number(result.metrics.max_drawdown, 6)}%`],
+      ["in-sample PnL", `${number(result.metrics_in_sample.pnl)} over ${result.in_sample_candles} candles (training stretch, for comparison)`],
     ]);
   show("scenario-out", render)(post("/run-config", $("scenario-ini").value, false));
 });

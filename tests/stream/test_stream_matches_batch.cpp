@@ -1,5 +1,7 @@
 #include "catch2_compat.hpp"
 
+#include "TestBacktestHelpers.hpp"
+
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -86,33 +88,16 @@ TEST_CASE("The streaming path matches the batch path bar for bar", "[stream][bat
     // The tamper-proof half. Feed what the stream dispatched into a fresh Backtester wired
     // exactly as run_scenario wires it: any one-bar shift in when a prediction is used, or any
     // drift in the snapshot indicators, changes the trades and fails here.
-    fin::signal::SignalEngineConfig scfg{};
-    scfg.rsi_buy_below = cfg.rsi_buy;
-    scfg.rsi_sell_above = cfg.rsi_sell;
-    scfg.use_ema_crossover = cfg.use_ema_crossover;
-
-    fin::backtest::BacktestConfig btcfg{};
-    btcfg.ema_fast = cfg.ema_fast;
-    btcfg.ema_slow = cfg.ema_slow;
-    btcfg.rsi_period = cfg.rsi_period;
-
-    fin::backtest::Backtester bt(btcfg, fin::signal::SignalEngine{scfg});
+    std::vector<backtest_test::Bar> bars;
     for (const auto &event : sink.events)
-        bt.on_candle(event.candle, event.prediction);
-    const auto metrics = bt.finalize();
-
-    REQUIRE(metrics.trades == result.metrics.trades);
-    REQUIRE(metrics.wins == result.metrics.wins);
-    REQUIRE(metrics.losses == result.metrics.losses);
-    REQUIRE(metrics.final_cash == Approx(result.metrics.final_cash).margin(1e-9));
-    REQUIRE(metrics.pnl == Approx(result.metrics.pnl).margin(1e-9));
-    REQUIRE(metrics.return_pct == Approx(result.metrics.return_pct).margin(1e-9));
-    REQUIRE(metrics.max_drawdown == Approx(result.metrics.max_drawdown).margin(1e-9));
+        bars.emplace_back(event.candle, event.prediction);
+    const auto split = backtest_test::split_backtest(bars, cfg, result.out_of_sample_from_ms);
+    backtest_test::require_matches(split, result);
 
     // The two paths also agree on how many signals the model decided, counted independently:
-    // by the stream's pipeline, by the batch's backtester, and by the one above.
-    REQUIRE(stats.model_decisive == static_cast<std::size_t>(result.metrics.model_decisive_signals));
-    REQUIRE(metrics.model_decisive_signals == result.metrics.model_decisive_signals);
+    // the stream's pipeline counts every candle, the batch splits them at the same point.
+    REQUIRE(stats.model_decisive == static_cast<std::size_t>(result.metrics.model_decisive_signals +
+                                                             result.metrics_in_sample.model_decisive_signals));
 
     std::filesystem::remove(ticks);
 }

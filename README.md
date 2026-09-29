@@ -42,6 +42,8 @@ Subcommands: `features`, `backtest`, `train-linear`, `run-mvp`, `run-config`, `s
 ./build/aiquant backtest scenarios/ticks_mvp.csv --model-linear model.csv
 ```
 
+The trading metrics of `run-mvp` and `run-config` (and of the HTTP scenario endpoints and the Python module) are reported **out of sample**: `metrics` covers only the candles after the model's training rows, and `metrics_in_sample` the stretch it was trained on, beside it for comparison. A large gap between the two is what overfitting looks like. `backtest --model-linear` cannot know which candles its model was trained on, so it trades the whole file.
+
 A scenario needs enough candles to clear indicator warmup: about 33 with the default periods, plus at least 3 feature rows. `scenarios/ticks_mvp.csv` is a synthetic 300-tick file that satisfies this; the small `ticks_*.csv` files written by the tests do not.
 
 ## Scenario Configs

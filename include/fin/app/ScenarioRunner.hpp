@@ -110,7 +110,18 @@ namespace fin::app
         // For an SGD run this is the exported equivalent (SgdRegressor::to_linear_model), so
         // the reported weights, the saved file and the served model are one and the same.
         fin::ml::LinearTrainingSummary training;
+        // The backtest over the out-of-sample stretch only: from the candle of the first
+        // validation row to the end. The indicators are warmed on every candle before it, but
+        // nothing trades there. This is the headline figure.
         fin::backtest::Metrics metrics;
+        // The same strategy over the stretch the model was trained on (warmup included), for
+        // comparison: a large gap between the two is what overfitting looks like. Any position
+        // still open at the split is closed there.
+        fin::backtest::Metrics metrics_in_sample;
+        std::size_t in_sample_candles = 0;
+        std::size_t out_of_sample_candles = 0;
+        // Start time of the first out-of-sample candle.
+        long long out_of_sample_from_ms = 0;
         bool model_saved = false;
     };
 
