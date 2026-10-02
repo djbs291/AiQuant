@@ -7,16 +7,21 @@
 #include "fin/io/Pipeline.hpp"
 #include "fin/ml/LinearTrainer.hpp"
 #include "fin/ml/SgdRegressor.hpp"
+#include "fin/ml/MlpRegressor.hpp"
 #include "fin/backtest/Backtester.hpp"
 
 namespace fin::app
 {
     // Which trainer produces the model. Ridge is the closed-form solver the engine has always
-    // used; Sgd is the online learner, and the only one `online_update` can drive.
+    // used; Sgd is the online learner, and the only one `online_update` can drive; Mlp is the
+    // feed-forward net, the first nonlinear model. Ridge and Sgd fold into a LinearModel and so
+    // can be saved and served through the existing file format; Mlp cannot, so `model_out` is
+    // refused for it until an MLP persistence path exists.
     enum class ModelKind
     {
         Ridge,
-        Sgd
+        Sgd,
+        Mlp
     };
 
     struct ScenarioConfig
@@ -33,6 +38,8 @@ namespace fin::app
         ModelKind model = ModelKind::Ridge;
         // Only read when model is Sgd.
         fin::ml::SgdOptions sgd{};
+        // Only read when model is Mlp.
+        fin::ml::MlpOptions mlp{};
         // Keep learning through the out-of-sample stretch: every candle that closes hands the
         // model the target it has just realized, as one partial_fit. Requires model = Sgd.
         bool online_update = false;

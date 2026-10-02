@@ -51,13 +51,19 @@ key = value  # optional inline comment
 | `stoch_d`, `stoch_d_period` | size_t | `3` | Stochastic %D period. |
 | `zscore`, `zscore_period` | size_t | `20` | Z-Score window. |
 | `momentum`, `momentum_period` | size_t | `10` | Momentum lookback. |
-| `model` | enum | `ridge` | `ridge` (the closed-form solver, and the historical behaviour) or `sgd` (stochastic gradient descent). The value is case-folded; `linear` is an alias for `ridge`. |
+| `model` | enum | `ridge` | `ridge` (the closed-form solver, and the historical behaviour), `sgd` (stochastic gradient descent) or `mlp` (a feed-forward neural net, the first nonlinear model). The value is case-folded; `linear` is an alias for `ridge`. |
 | `sgd_learning_rate`, `sgd_lr` | double | `0.01` | Step size at the first update. Read only when `model = sgd`. |
 | `sgd_l2` | double | `1e-6` | L2 penalty on the weights. The bias is deliberately excluded. |
 | `sgd_epochs` | size_t | `10` | Sequential passes over the training rows. Must be at least 1. |
 | `sgd_power_t` | double | `0.25` | Decay exponent: `eta_t = sgd_learning_rate / (1 + t)^sgd_power_t`. Zero holds the rate constant. |
 | `sgd_standardize` | bool | `true` | Center and scale each column by its running mean and standard deviation before each update. |
 | `online_update`, `online` | bool | `false` | Keep training through the out-of-sample stretch. Requires `model = sgd`. |
+| `mlp_hidden` | list | `8` | Hidden-layer widths, comma-separated, e.g. `16,8` for two layers. Each must be `>= 1`, and the list must be non-empty. Read only when `model = mlp`. |
+| `mlp_learning_rate`, `mlp_lr` | double | `0.01` | Constant step size. There is no decay schedule; a deeper net is sensitive enough that a fixed rate is easier to tune. |
+| `mlp_l2` | double | `1e-6` | L2 penalty on the weight matrices. The biases are excluded. |
+| `mlp_epochs` | size_t | `200` | Sequential passes over the training rows. An MLP needs far more than the linear models. Must be at least 1. |
+| `mlp_activation` | enum | `tanh` | Hidden-layer nonlinearity, `tanh` or `relu`. The output layer is always linear (this is regression). |
+| `mlp_seed` | size_t | `42` | Seeds the deterministic weight initialization, so a run over the same data is reproducible. |
 
 ## Feature catalogue
 
@@ -129,6 +135,23 @@ than an error.
 
 See `examples/sgd_online.ini` for a tuned, runnable configuration.
 
+`mlp` fits the same target with a feed-forward neural network: one or more hidden layers
+(`mlp_hidden`) with a `tanh` or `relu` nonlinearity, and a linear output. It is the first model
+that can fit relationships the ridge and sgd paths cannot, and like `sgd` it standardizes its
+inputs for the same reason (one learning rate cannot serve `close` and `macd` at once) and
+visits samples in order without shuffling, so a run is reproducible; the weight initialization
+is seeded from `mlp_seed`, never a clock. Two things to know:
+
+- **It needs tuning per feature set.** `mlp_learning_rate` and `mlp_epochs` interact with the
+  scale of the target deltas and the chosen features. An untuned net can score worse than ridge
+  on smooth, near-linear data; that is expected, not a bug. The model raises an error naming
+  the learning rate if it diverges, rather than emitting NaNs.
+- **It cannot be saved or served yet.** An MLP does not fold into linear weights, so the linear
+  model file cannot represent it. `model_out` with `model = mlp` is refused up front, at every
+  front-end, rather than writing a bias-only linear file that is not the trained model. The
+  weights are therefore not reported either. Online learning (`online_update`) is wired for
+  `sgd` only. Persistence and serving for the MLP are planned follow-up work.
+
 ## Validation
 
 The load fails, naming the key and the line, rather than accepting a value that cannot mean
@@ -158,7 +181,11 @@ anything:
 - **The `sgd_*` options are checked even when `model = ridge`:** `sgd_learning_rate > 0`,
   `sgd_l2 >= 0`, `sgd_power_t >= 0`, `sgd_epochs >= 1`. A scenario that carries a bad value
   it does not use is still carrying a mistake.
+- **The `mlp_*` options are checked the same way, whatever the model:** `mlp_hidden` non-empty
+  with every width `>= 1`, `mlp_learning_rate > 0`, `mlp_l2 >= 0`, `mlp_epochs >= 1`.
 - **`online_update = true` requires `model = sgd`**, in either order in the file.
+- **`model_out` is refused when `model = mlp`**: an MLP cannot be written in the linear model
+  file format.
 
 `train_ratio` is the exception: any finite value is accepted and *clamped* to `[0.1, 0.95]`,
 which is long-standing behaviour the runner relies on.
