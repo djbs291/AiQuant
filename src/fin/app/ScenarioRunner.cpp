@@ -120,6 +120,8 @@ namespace fin::app
             {"sgd_learning_rate", config.sgd.learning_rate},
             {"sgd_l2", config.sgd.l2},
             {"sgd_power_t", config.sgd.power_t},
+            {"mlp_learning_rate", config.mlp.learning_rate},
+            {"mlp_l2", config.mlp.l2},
         };
         for (const auto &[name, value] : numbers)
         {
@@ -209,6 +211,47 @@ namespace fin::app
             return false;
         }
 
+        // MlpRegressor refuses these too, but only when model = mlp; a scenario that carries a
+        // broken architecture while training something else is still carrying a mistake.
+        if (config.mlp.hidden_layers.empty())
+        {
+            error = "Invalid mlp_hidden: an MLP needs at least one hidden layer";
+            return false;
+        }
+        for (std::size_t width : config.mlp.hidden_layers)
+        {
+            if (width == 0)
+            {
+                error = "Invalid mlp_hidden: every hidden layer must have width >= 1";
+                return false;
+            }
+        }
+        if (config.mlp.learning_rate <= 0.0)
+        {
+            error = "Invalid mlp_learning_rate: must be > 0";
+            return false;
+        }
+        if (config.mlp.l2 < 0.0)
+        {
+            error = "Invalid mlp_l2: must be >= 0";
+            return false;
+        }
+        if (config.mlp.epochs == 0)
+        {
+            error = "Invalid mlp_epochs: must be >= 1";
+            return false;
+        }
+
+        // An MLP does not fold into linear weights, so the linear model file cannot represent
+        // it. Refuse the combination up front, at every front-end, rather than writing a
+        // bias-only linear file that silently is not the trained model.
+        if (config.model == ModelKind::Mlp && config.model_output_path)
+        {
+            error = "model_out is not supported for model = mlp: an MLP cannot be saved in the "
+                    "linear model file format";
+            return false;
+        }
+
         return true;
     }
 
@@ -234,7 +277,9 @@ namespace fin::app
         result.candles = res.candles.size();
         result.symbol = res.symbol;
         result.ticks_other_symbol = res.ticks_other_symbol;
-        result.model = (config.model == ModelKind::Sgd) ? "sgd" : "ridge";
+        result.model = (config.model == ModelKind::Sgd) ? "sgd"
+                       : (config.model == ModelKind::Mlp) ? "mlp"
+                                                          : "ridge";
         result.online_update = config.online_update;
 
         const std::vector<std::string> &feature_names =
@@ -273,6 +318,9 @@ namespace fin::app
         // Kept beside the exported LinearModel because it is the only one that can go on
         // learning: everything downstream reads the export, the online phase reads this.
         std::optional<fin::ml::SgdRegressor> sgd_model;
+        // The MLP does not fold into linear weights, so it is not exported: it makes its own
+        // predictions in the validation scoring and the backtest replay below.
+        std::optional<fin::ml::MlpRegressor> mlp_model;
 
         if (config.model == ModelKind::Sgd)
         {
@@ -295,6 +343,27 @@ namespace fin::app
             training_summary.mse = sgd_summary.mse;
             training_summary.samples = sgd_summary.samples;
             sgd_model = std::move(sgd_summary.model);
+        }
+        else if (config.model == ModelKind::Mlp)
+        {
+            fin::ml::MlpTrainingSummary mlp_summary;
+            try
+            {
+                mlp_summary = fin::ml::train_mlp_from_feature_rows(training, config.mlp);
+            }
+            catch (const std::exception &ex)
+            {
+                // Divergence names the learning rate itself; add what it was fitting.
+                throw std::runtime_error(std::string(ex.what()) + " (mlp over " +
+                                         std::to_string(feature_names.size()) + " features: [" +
+                                         join_names(feature_names) + "])");
+            }
+
+            // No linear export: training_summary.model stays empty, so the report prints no
+            // weights for it. The fit quality still travels, beside the other two models'.
+            training_summary.mse = mlp_summary.mse;
+            training_summary.samples = mlp_summary.samples;
+            mlp_model = std::move(mlp_summary.model);
         }
         else
         {
@@ -324,6 +393,13 @@ namespace fin::app
         training_summary.model.set_timeframe(fin::io::timeframe_token(config.timeframe));
         result.training = training_summary;
 
+        // The model that makes the frozen (as-trained) predictions, in the validation scoring
+        // and in the backtest replay when nothing is learning online. For ridge and sgd it is
+        // the exported LinearModel; the MLP predicts directly, since it has no linear form.
+        const fin::ml::IModel &frozen_model =
+            mlp_model ? static_cast<const fin::ml::IModel &>(*mlp_model)
+                      : static_cast<const fin::ml::IModel &>(training_summary.model);
+
         double sse = 0.0;
         std::size_t validation_samples = 0;
         std::size_t preview_limit = config.validation_preview_limit;
@@ -341,7 +417,7 @@ namespace fin::app
         for (std::size_t i = train_rows; i + 1 < rows.size(); ++i)
         {
             auto fv = fin::ml::FeatureVector::from_feature_row(rows[i]);
-            const double pred = training_summary.model.predict(fv);
+            const double pred = frozen_model.predict(fv);
             const double target = rows[i + 1].close - rows[i].close;
             const double err = pred - target;
             sse += err * err;
@@ -452,7 +528,7 @@ namespace fin::app
                 }
 
                 auto fv = fin::ml::FeatureVector::from_feature_row(*row);
-                prediction = live_model ? live_model->predict(fv) : training_summary.model.predict(fv);
+                prediction = live_model ? live_model->predict(fv) : frozen_model.predict(fv);
                 previous_row = *row;
                 ++emitted_rows;
             }

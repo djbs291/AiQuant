@@ -142,6 +142,7 @@ namespace fin::app
                 {"model_output", "model_out"},
                 {"preview_limit", "preview"},
                 {"sgd_lr", "sgd_learning_rate"},
+                {"mlp_lr", "mlp_learning_rate"},
                 {"online", "online_update"},
             };
             for (const auto &[alias, canonical] : aliases)
@@ -519,10 +520,12 @@ namespace fin::app
                     cfg.model = ModelKind::Ridge;
                 else if (token == "sgd")
                     cfg.model = ModelKind::Sgd;
+                else if (token == "mlp")
+                    cfg.model = ModelKind::Mlp;
                 else
                 {
                     error = "Unknown model '" + value + "' at line " + std::to_string(line_no) +
-                            " (expected ridge or sgd)";
+                            " (expected ridge, sgd or mlp)";
                     return false;
                 }
             }
@@ -585,6 +588,87 @@ namespace fin::app
                     return false;
                 }
                 cfg.online_update = *b;
+            }
+            else if (name == "mlp_hidden")
+            {
+                // A comma-separated list of hidden-layer widths, e.g. `mlp_hidden = 16,8`.
+                std::vector<std::string> items;
+                std::string list_error;
+                if (!parse_list_value(value, items, list_error))
+                {
+                    error = "Invalid mlp_hidden at line " + std::to_string(line_no) + ": " + list_error;
+                    return false;
+                }
+                std::vector<std::size_t> widths;
+                widths.reserve(items.size());
+                for (const auto &item : items)
+                {
+                    std::size_t w = 0;
+                    if (!parse_size_value(item, w))
+                    {
+                        error = "Invalid mlp_hidden at line " + std::to_string(line_no) +
+                                ": '" + item + "' is not a layer width";
+                        return false;
+                    }
+                    widths.push_back(w);
+                }
+                cfg.mlp.hidden_layers = std::move(widths);
+            }
+            else if (name == "mlp_learning_rate")
+            {
+                double v = 0.0;
+                if (!parse_double_value(value, v))
+                {
+                    error = "Invalid mlp_learning_rate at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.mlp.learning_rate = v;
+            }
+            else if (name == "mlp_l2")
+            {
+                double v = 0.0;
+                if (!parse_double_value(value, v))
+                {
+                    error = "Invalid mlp_l2 at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.mlp.l2 = v;
+            }
+            else if (name == "mlp_epochs")
+            {
+                std::size_t v = 0;
+                if (!parse_size_value(value, v))
+                {
+                    error = "Invalid mlp_epochs at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.mlp.epochs = v;
+            }
+            else if (name == "mlp_activation")
+            {
+                std::string token = value;
+                std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
+                               { return static_cast<char>(std::tolower(ch)); });
+                if (token == "tanh")
+                    cfg.mlp.activation = fin::ml::MlpActivation::Tanh;
+                else if (token == "relu")
+                    cfg.mlp.activation = fin::ml::MlpActivation::Relu;
+                else
+                {
+                    error = "Unknown mlp_activation '" + value + "' at line " + std::to_string(line_no) +
+                            " (expected tanh or relu)";
+                    return false;
+                }
+            }
+            else if (name == "mlp_seed")
+            {
+                std::size_t v = 0;
+                if (!parse_size_value(value, v))
+                {
+                    error = "Invalid mlp_seed at line " + std::to_string(line_no);
+                    return false;
+                }
+                cfg.mlp.seed = static_cast<std::uint64_t>(v);
             }
             else if (name == "symbol")
             {

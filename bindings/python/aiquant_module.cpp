@@ -126,6 +126,41 @@ namespace
         }
     }
 
+    bool set_size_list(const py::dict &dict, const char *name, std::vector<std::size_t> &target, std::string &error)
+    {
+        bool present = false;
+        py::object value = get_if_present(dict, name, &present);
+        if (!present)
+            return true;
+        if (!py::isinstance<py::list>(value) && !py::isinstance<py::tuple>(value))
+        {
+            error = std::string(name) + " must be a list of positive integers";
+            return false;
+        }
+        try
+        {
+            std::vector<long long> raw = value.cast<std::vector<long long>>();
+            std::vector<std::size_t> out;
+            out.reserve(raw.size());
+            for (long long v : raw)
+            {
+                if (v <= 0)
+                {
+                    error = std::string(name) + " must be a list of positive integers";
+                    return false;
+                }
+                out.push_back(static_cast<std::size_t>(v));
+            }
+            target = std::move(out);
+            return true;
+        }
+        catch (const py::cast_error &)
+        {
+            error = std::string(name) + " must be a list of positive integers";
+            return false;
+        }
+    }
+
     bool set_bool(const py::dict &dict, const char *name, bool &target, std::string &error)
     {
         bool present = false;
@@ -239,6 +274,34 @@ namespace
         if (!set_double(dict, "sgd_power_t", cfg.sgd.power_t, error)) return false;
         if (!set_bool(dict, "sgd_standardize", cfg.sgd.standardize, error)) return false;
         if (!set_bool(dict, "online_update", cfg.online_update, error)) return false;
+        if (!set_size_list(dict, "mlp_hidden", cfg.mlp.hidden_layers, error)) return false;
+        if (!set_double(dict, "mlp_learning_rate", cfg.mlp.learning_rate, error)) return false;
+        if (!set_double(dict, "mlp_l2", cfg.mlp.l2, error)) return false;
+        if (!set_size(dict, "mlp_epochs", cfg.mlp.epochs, error)) return false;
+        {
+            std::size_t seed = cfg.mlp.seed;
+            if (!set_size(dict, "mlp_seed", seed, error)) return false;
+            cfg.mlp.seed = static_cast<std::uint64_t>(seed);
+        }
+
+        if (py::object act = get_if_present(dict, "mlp_activation", &present); present)
+        {
+            if (!py::isinstance<py::str>(act))
+            {
+                error = "mlp_activation must be a string";
+                return false;
+            }
+            const std::string token = act.cast<std::string>();
+            if (token == "tanh")
+                cfg.mlp.activation = fin::ml::MlpActivation::Tanh;
+            else if (token == "relu")
+                cfg.mlp.activation = fin::ml::MlpActivation::Relu;
+            else
+            {
+                error = "Unknown mlp_activation: " + token + " (expected 'tanh' or 'relu')";
+                return false;
+            }
+        }
 
         if (py::object kind = get_if_present(dict, "model", &present); present)
         {
@@ -254,9 +317,11 @@ namespace
                 cfg.model = fin::app::ModelKind::Ridge;
             else if (token == "sgd")
                 cfg.model = fin::app::ModelKind::Sgd;
+            else if (token == "mlp")
+                cfg.model = fin::app::ModelKind::Mlp;
             else
             {
-                error = "Unknown model: " + token + " (expected 'ridge' or 'sgd')";
+                error = "Unknown model: " + token + " (expected 'ridge', 'sgd' or 'mlp')";
                 return false;
             }
         }
@@ -343,13 +408,21 @@ namespace
         dict["timeframe"] = timeframe_to_str(cfg.timeframe);
         dict["train_ratio"] = cfg.train_ratio;
         dict["ridge_lambda"] = cfg.ridge_lambda;
-        dict["model"] = (cfg.model == fin::app::ModelKind::Sgd) ? "sgd" : "ridge";
+        dict["model"] = (cfg.model == fin::app::ModelKind::Sgd) ? "sgd"
+                        : (cfg.model == fin::app::ModelKind::Mlp) ? "mlp"
+                                                                  : "ridge";
         dict["sgd_learning_rate"] = cfg.sgd.learning_rate;
         dict["sgd_l2"] = cfg.sgd.l2;
         dict["sgd_epochs"] = cfg.sgd.epochs;
         dict["sgd_power_t"] = cfg.sgd.power_t;
         dict["sgd_standardize"] = cfg.sgd.standardize;
         dict["online_update"] = cfg.online_update;
+        dict["mlp_hidden"] = cfg.mlp.hidden_layers;
+        dict["mlp_learning_rate"] = cfg.mlp.learning_rate;
+        dict["mlp_l2"] = cfg.mlp.l2;
+        dict["mlp_epochs"] = cfg.mlp.epochs;
+        dict["mlp_activation"] = (cfg.mlp.activation == fin::ml::MlpActivation::Relu) ? "relu" : "tanh";
+        dict["mlp_seed"] = cfg.mlp.seed;
         dict["ema_fast"] = cfg.ema_fast;
         dict["ema_slow"] = cfg.ema_slow;
         dict["rsi_period"] = cfg.rsi_period;

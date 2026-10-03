@@ -549,7 +549,7 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
 {
     if (args.empty())
     {
-        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--symbol SYM] [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--model ridge|sgd] [--sgd-lr N] [--sgd-l2 N] [--sgd-epochs N] [--sgd-power-t N] [--no-sgd-standardize] [--online] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--model-weight W] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
+        std::cerr << "Usage: aiquant run-mvp <ticks.csv> [--symbol SYM] [--tf S1|S5|M1|M5|H1] [--train-ratio 0.1-0.95] [--ridge L] [--model ridge|sgd|mlp] [--sgd-lr N] [--sgd-l2 N] [--sgd-epochs N] [--sgd-power-t N] [--no-sgd-standardize] [--online] [--mlp-hidden 16,8] [--mlp-lr N] [--mlp-l2 N] [--mlp-epochs N] [--mlp-activation tanh|relu] [--mlp-seed N] [--cash N] [--qty N] [--fee N] [--ema-fast N] [--ema-slow N] [--rsi N] [--macd-fast N] [--macd-slow N] [--macd-signal N] [--rsi-buy N|--rsi_buy N] [--rsi-sell N|--rsi_sell N] [--no-ema-xover] [--model-weight W] [--preview N] [--preview-out path] [--model-out path] [--features a,b,c] [--json]\n";
         return 2;
     }
 
@@ -574,11 +574,13 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
                        { return static_cast<char>(std::tolower(ch)); });
         if (token == "sgd")
             cfg.model = fin::app::ModelKind::Sgd;
+        else if (token == "mlp")
+            cfg.model = fin::app::ModelKind::Mlp;
         else if (token == "ridge" || token == "linear")
             cfg.model = fin::app::ModelKind::Ridge;
         else
         {
-            std::cerr << "Unknown --model '" << *model << "' (expected ridge or sgd)\n";
+            std::cerr << "Unknown --model '" << *model << "' (expected ridge, sgd or mlp)\n";
             return 2;
         }
     }
@@ -595,6 +597,65 @@ static int cmd_run_mvp(const std::vector<std::string> &args)
     // Requires --model sgd; run_scenario refuses the combination rather than ignoring it.
     if (flag_present(args, "--online"))
         cfg.online_update = true;
+
+    if (auto hidden = parse_string_flag(args, "--mlp-hidden"))
+    {
+        // Comma-separated hidden-layer widths, e.g. --mlp-hidden 16,8.
+        std::vector<std::size_t> widths;
+        std::size_t start = 0;
+        const std::string &list = *hidden;
+        bool ok = true;
+        while (start <= list.size())
+        {
+            const std::size_t comma = list.find(',', start);
+            const std::size_t end = (comma == std::string::npos) ? list.size() : comma;
+            std::string item = list.substr(start, end - start);
+            const auto first = item.find_first_not_of(" \t");
+            const auto last = item.find_last_not_of(" \t");
+            if (first != std::string::npos)
+            {
+                item = item.substr(first, last - first + 1);
+                std::size_t w = 0;
+                auto [ptr, ec] = std::from_chars(item.data(), item.data() + item.size(), w);
+                if (ec != std::errc{} || ptr != item.data() + item.size())
+                    ok = false;
+                else
+                    widths.push_back(w);
+            }
+            if (comma == std::string::npos)
+                break;
+            start = comma + 1;
+        }
+        if (!ok || widths.empty())
+        {
+            std::cerr << "Invalid --mlp-hidden '" << *hidden << "' (expected comma-separated widths, e.g. 16,8)\n";
+            return 2;
+        }
+        cfg.mlp.hidden_layers = std::move(widths);
+    }
+    if (auto v = parse_double_flag(args, "--mlp-lr"))
+        cfg.mlp.learning_rate = *v;
+    if (auto v = parse_double_flag(args, "--mlp-l2"))
+        cfg.mlp.l2 = *v;
+    if (auto v = parse_size_flag(args, "--mlp-epochs"))
+        cfg.mlp.epochs = *v;
+    if (auto v = parse_size_flag(args, "--mlp-seed"))
+        cfg.mlp.seed = static_cast<std::uint64_t>(*v);
+    if (auto act = parse_string_flag(args, "--mlp-activation"))
+    {
+        std::string token = *act;
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
+                       { return static_cast<char>(std::tolower(ch)); });
+        if (token == "tanh")
+            cfg.mlp.activation = fin::ml::MlpActivation::Tanh;
+        else if (token == "relu")
+            cfg.mlp.activation = fin::ml::MlpActivation::Relu;
+        else
+        {
+            std::cerr << "Unknown --mlp-activation '" << *act << "' (expected tanh or relu)\n";
+            return 2;
+        }
+    }
 
     if (auto v = parse_size_flag(args, "--ema-fast"))
         cfg.ema_fast = *v;
