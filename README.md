@@ -175,6 +175,7 @@ Use the interpreter CMake found (printed as `Found Python3` at configure time); 
 curl http://localhost:8080/health                                              # liveness
 curl -X POST http://localhost:8080/run-file --data "mvp.ini"                   # body = path under --root
 curl -X POST http://localhost:8080/run-config --data-binary @scenarios/mvp.ini # body = raw INI
+curl -X POST http://localhost:8080/run-inline -d '{"ticks_csv": "...", "config": "tf = M1"}' # data in the request
 curl -X POST http://localhost:8080/predict -d '{"features": {"close": 100, "rsi": 55}}'
 curl -X POST http://localhost:8080/signal  -d '{"close": 100, "rsi": 20, "ema_fast": 11, "ema_slow": 10}'
 ```
@@ -204,6 +205,15 @@ Every field is optional. Supply `prediction` to evaluate the rules against a num
 `POST /run-file` takes a path to a scenario file; it is resolved against `--root` (default: the working directory) and anything outside that directory is refused. `POST /run-config` accepts raw INI contents and executes them via a temporary file. Both return the JSON emitted by the CLI `--json` flag.
 
 The files a scenario names are held to `--root` too, on both endpoints: its `ticks` file (`403` outside the root, `404` if missing) and any `model_out` (`403` outside, `404` if the directory does not exist). Relative paths inside a scenario resolve against the server's **working directory**, exactly as they do on the CLI, and are then checked against the root — so `scenarios/mvp.ini`, whose `ticks = scenarios/ticks_mvp.csv`, runs with `--root scenarios` from the repository root. A `model_out` that is itself a symlink is refused wherever it points. Writing a model inside the root is allowed, so a model trained through `/run-config` can be served by `/predict`.
+
+`POST /run-inline` is the one scenario endpoint that needs **no access to the server's filesystem**: the caller sends the tick data and the scenario in the request, so a remote client can back-test its own data. The body is a JSON object:
+
+```json
+{"ticks_csv": "Timestamp,symbol,price,volume\n1693492800000,ABC,100.0,1\n...",
+ "config": "tf = M1\nmodel = ridge\nfeatures = close,ema_fast,rsi\n"}
+```
+
+`ticks_csv` (required) is a CSV in the same format `FileTickSource` reads. `config` (optional) is scenario INI **without** a `ticks` key — the data is the ticks; setting one too is a `400`. The reply is the usual scenario JSON, with `ticks_path` shown as `"(inline)"` rather than a server temp path. `model_out` is refused (`400`): the call is stateless, with nowhere to hand a file back. Everything else — `422` for too few candles, the indicator and model config — behaves as on `/run-config`.
 
 The service listens on **`127.0.0.1` by default**. It has **no TLS** — terminate it at a reverse proxy — so exposing it is a decision to make explicitly with `--bind 0.0.0.0` (or a specific address). Before 2026-09-27 it listened on every interface.
 
