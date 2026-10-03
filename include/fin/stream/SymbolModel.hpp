@@ -11,7 +11,6 @@
 #include "fin/indicators/FeatureSpec.hpp"
 #include "fin/io/Options.hpp"
 #include "fin/ml/IModel.hpp"
-#include "fin/ml/LinearModel.hpp"
 
 namespace fin::stream
 {
@@ -40,8 +39,9 @@ namespace fin::stream
     // clashed, when an explicit override disagrees with what the file records -- a model run
     // on features computed differently from how it was trained predicts wrongly and says
     // nothing. A file from before these were recorded gives `base` and the overrides, as
-    // before. `model` becomes the SymbolModel's model.
-    bool symbol_model_from(std::shared_ptr<fin::ml::LinearModel> model, const ModelOverrides &overrides,
+    // before. `model` becomes the SymbolModel's model. Takes any IModel, so a linear model and
+    // an MLP are both routed through the same path -- both read their metadata off IModel.
+    bool symbol_model_from(std::shared_ptr<fin::ml::IModel> model, const ModelOverrides &overrides,
                            const fin::indicators::FeatureParams &base, SymbolModel &out, std::string &error);
 
 } // namespace fin::stream

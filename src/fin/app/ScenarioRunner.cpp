@@ -242,16 +242,6 @@ namespace fin::app
             return false;
         }
 
-        // An MLP does not fold into linear weights, so the linear model file cannot represent
-        // it. Refuse the combination up front, at every front-end, rather than writing a
-        // bias-only linear file that silently is not the trained model.
-        if (config.model == ModelKind::Mlp && config.model_output_path)
-        {
-            error = "model_out is not supported for model = mlp: an MLP cannot be saved in the "
-                    "linear model file format";
-            return false;
-        }
-
         return true;
     }
 
@@ -384,13 +374,25 @@ namespace fin::app
             }
         }
         // Carried by the model, and so written into any file it is saved to: a per-symbol model
-        // directory can then tell a model stored under the wrong symbol's name.
-        training_summary.model.set_symbol(result.symbol);
-        // And the periods and candles its features were computed with, so whoever loads the
-        // file rebuilds the same features rather than whatever its own flags say.
-        training_summary.model.set_training_params(
-            fin::indicators::feature_params_for(result.features, make_feature_params(config)));
-        training_summary.model.set_timeframe(fin::io::timeframe_token(config.timeframe));
+        // directory can then tell a model stored under the wrong symbol's name. The periods and
+        // candles its features were computed with travel too, so whoever loads the file rebuilds
+        // the same features rather than whatever its own flags say.
+        const auto saved_params =
+            fin::indicators::feature_params_for(result.features, make_feature_params(config));
+        const std::string saved_tf = fin::io::timeframe_token(config.timeframe);
+        if (mlp_model)
+        {
+            // The MLP carries its own metadata, since it is saved and served as itself.
+            mlp_model->set_symbol(result.symbol);
+            mlp_model->set_training_params(saved_params);
+            mlp_model->set_timeframe(saved_tf);
+        }
+        else
+        {
+            training_summary.model.set_symbol(result.symbol);
+            training_summary.model.set_training_params(saved_params);
+            training_summary.model.set_timeframe(saved_tf);
+        }
         result.training = training_summary;
 
         // The model that makes the frozen (as-trained) predictions, in the validation scoring
@@ -449,9 +451,13 @@ namespace fin::app
         if (config.model_output_path)
         {
             // The model as trained, before any online update: the file is the artifact of the
-            // training run, not of the replay that follows it.
-            if (!fin::ml::save_linear_model(training_summary.model, *config.model_output_path))
-                throw std::runtime_error("Failed to persist linear model to " + *config.model_output_path);
+            // training run, not of the replay that follows it. An MLP is written in its own
+            // format (it does not fold into linear weights); ridge and sgd share the linear one.
+            const bool saved = mlp_model
+                                   ? fin::ml::save_mlp_model(*mlp_model, *config.model_output_path)
+                                   : fin::ml::save_linear_model(training_summary.model, *config.model_output_path);
+            if (!saved)
+                throw std::runtime_error("Failed to persist model to " + *config.model_output_path);
             result.model_saved = true;
         }
 

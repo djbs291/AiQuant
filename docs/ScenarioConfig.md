@@ -146,11 +146,14 @@ is seeded from `mlp_seed`, never a clock. Two things to know:
   scale of the target deltas and the chosen features. An untuned net can score worse than ridge
   on smooth, near-linear data; that is expected, not a bug. The model raises an error naming
   the learning rate if it diverges, rather than emitting NaNs.
-- **It cannot be saved or served yet.** An MLP does not fold into linear weights, so the linear
-  model file cannot represent it. `model_out` with `model = mlp` is refused up front, at every
-  front-end, rather than writing a bias-only linear file that is not the trained model. The
-  weights are therefore not reported either. Online learning (`online_update`) is wired for
-  `sgd` only. Persistence and serving for the MLP are planned follow-up work.
+- **It has its own file format.** An MLP does not fold into linear weights, so it is written in
+  a format of its own (a `# type: mlp` header, the same metadata comments a linear file carries,
+  then the architecture, the standardizer moments and every weight). `model_out` saves it there,
+  and `aiquant backtest --model-linear`, `aiquant stream` (including `--model-dir`, which may mix
+  linear and MLP files) and the HTTP `/predict` endpoint all load it through the same entry point
+  as a linear model — they read its metadata and predict through the shared `IModel` interface,
+  so a reloaded MLP predicts bit-for-bit as the trained one. No linear weights are reported in
+  the run summary, since it has none. Online learning (`online_update`) is wired for `sgd` only.
 
 ## Validation
 
@@ -184,8 +187,6 @@ anything:
 - **The `mlp_*` options are checked the same way, whatever the model:** `mlp_hidden` non-empty
   with every width `>= 1`, `mlp_learning_rate > 0`, `mlp_l2 >= 0`, `mlp_epochs >= 1`.
 - **`online_update = true` requires `model = sgd`**, in either order in the file.
-- **`model_out` is refused when `model = mlp`**: an MLP cannot be written in the linear model
-  file format.
 
 `train_ratio` is the exception: any finite value is accepted and *clamped* to `[0.1, 0.95]`,
 which is long-standing behaviour the runner relies on.

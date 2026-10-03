@@ -185,7 +185,7 @@ static fin::stream::ModelOverrides explicit_overrides(const std::vector<std::str
 }
 
 // "tf M5, rsi=10, atr=7": what a model file made the run adopt, for the summary.
-static std::string describe_model_settings(const fin::ml::LinearModel &model)
+static std::string describe_model_settings(const fin::ml::IModel &model)
 {
     std::ostringstream out;
     out << "tf " << (model.timeframe().empty() ? "unrecorded" : model.timeframe());
@@ -227,25 +227,25 @@ static int cmd_backtest(const std::vector<std::string> &args)
 
     // The model comes first: the candles, the features and their periods may all be the ones
     // it records, and they have to be settled before a single candle is built.
-    std::optional<fin::ml::LinearModel> linear_model;
+    std::shared_ptr<fin::ml::IModel> model_ptr;
     fin::stream::SymbolModel settings;
     if (auto model_path = parse_string_flag(args, "--model-linear"))
     {
-        auto loaded = std::make_shared<fin::ml::LinearModel>();
-        if (!loaded->load_from_file(*model_path))
+        std::string error;
+        auto loaded = fin::ml::load_model_file(*model_path, error);
+        if (!loaded)
         {
             // It used to carry on without the model, which reported a backtest of a strategy
             // nobody asked for.
-            std::cerr << "Failed to load linear model configuration: " << *model_path << "\n";
+            std::cerr << error << "\n";
             return 1;
         }
-        std::string error;
         if (!fin::stream::symbol_model_from(loaded, explicit_overrides(args, {}, typed_tf), {}, settings, error))
         {
             std::cerr << error << "\n";
             return 1;
         }
-        linear_model = *loaded;
+        model_ptr = loaded;
         std::cerr << "Model: " << describe_model_settings(*loaded) << "\n";
     }
 
@@ -271,7 +271,7 @@ static int cmd_backtest(const std::vector<std::string> &args)
     // this used to build the default six with the flags' periods whatever the file said. The
     // snapshot EMA/RSI take the same periods, as they do in run_scenario.
     std::unique_ptr<fin::indicators::FeatureBus> feature_bus;
-    if (linear_model)
+    if (model_ptr)
     {
         const auto &params = *settings.params;
         cfg.ema_fast = params.ema_fast;
@@ -308,8 +308,8 @@ static int cmd_backtest(const std::vector<std::string> &args)
                 auto fv = fin::ml::FeatureVector::from_feature_row(*row);
                 try
                 {
-                    if (linear_model)
-                        prediction = linear_model->predict(fv);
+                    if (model_ptr)
+                        prediction = model_ptr->predict(fv);
                 }
                 catch (const std::exception &ex)
                 {
@@ -328,7 +328,7 @@ static int cmd_backtest(const std::vector<std::string> &args)
     std::cout << "PnL: " << m.pnl << " (" << m.return_pct << "%)\n";
     std::cout << "Max DD: " << m.max_drawdown << "%\n";
     std::cout << "Trades: " << m.trades << ", Wins: " << m.wins << ", Losses: " << m.losses << "\n";
-    if (linear_model)
+    if (model_ptr)
         std::cout << "Signals decided by the model: " << m.model_decisive_signals
                   << " (model weight " << scfg.model_weight << ")\n";
 
@@ -884,9 +884,9 @@ static int cmd_stream(const std::vector<std::string> &args)
     std::size_t models_loaded = 0;
     if (model_dir)
     {
-        std::unordered_map<std::string, std::shared_ptr<fin::ml::LinearModel>> models;
+        std::unordered_map<std::string, std::shared_ptr<fin::ml::IModel>> models;
         std::string error;
-        if (!fin::ml::load_linear_model_dir(*model_dir, models, error))
+        if (!fin::ml::load_model_dir(*model_dir, models, error))
         {
             std::cerr << error << "\n";
             return 1;
@@ -909,13 +909,13 @@ static int cmd_stream(const std::vector<std::string> &args)
     fin::stream::SymbolModel single{};
     if (auto model_path = parse_string_flag(args, "--model-linear"))
     {
-        auto loaded = std::make_shared<fin::ml::LinearModel>();
-        if (!loaded->load_from_file(*model_path))
+        std::string error;
+        auto loaded = fin::ml::load_model_file(*model_path, error);
+        if (!loaded)
         {
-            std::cerr << "Failed to load linear model: " << *model_path << "\n";
+            std::cerr << error << "\n";
             return 1;
         }
-        std::string error;
         if (!fin::stream::symbol_model_from(loaded, overrides, cfg.params, single, error))
         {
             std::cerr << error << "\n";

@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 
 #include "fin/ml/FeatureVector.hpp"
-#include "fin/ml/LinearModel.hpp"
+#include "fin/ml/IModel.hpp"
+#include "fin/ml/MlpRegressor.hpp" // load_model_file
 
 namespace fin::api
 {
@@ -33,7 +35,7 @@ namespace fin::api
 
         // Orders the caller's values the way the model expects. When the model records no
         // feature set (a file written before that existed) the caller's own order is used.
-        fin::ml::FeatureVector build_vector(const fin::ml::LinearModel &model,
+        fin::ml::FeatureVector build_vector(const fin::ml::IModel &model,
                                             const PredictRequest &request,
                                             std::vector<std::string> &order)
         {
@@ -108,16 +110,17 @@ namespace fin::api
         if (request.features.empty())
             throw std::invalid_argument("No feature values supplied");
 
-        fin::ml::LinearModel model;
-        if (!model.load_from_file(path))
-            throw std::invalid_argument("Failed to load model: " + path);
+        std::string load_error;
+        const std::shared_ptr<fin::ml::IModel> model = fin::ml::load_model_file(path, load_error);
+        if (!model)
+            throw std::invalid_argument(load_error.empty() ? ("Failed to load model: " + path) : load_error);
 
         std::vector<std::string> order;
-        const auto fv = build_vector(model, request, order);
-        model.validate_schema(fv);
+        const auto fv = build_vector(*model, request, order);
+        model->validate_schema(fv);
 
         PredictResponse response;
-        response.prediction = model.predict(fv);
+        response.prediction = model->predict(fv);
         response.features = std::move(order);
         response.model_path = path;
         return response;

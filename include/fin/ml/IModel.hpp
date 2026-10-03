@@ -4,6 +4,8 @@
 
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "fin/ml/FeatureVector.hpp"
@@ -42,6 +44,39 @@ namespace fin::ml
         {
             throw std::logic_error("partial_fit() not implemented for this model");
         }
+
+        // Metadata a persisted model carries, so the serving paths (the stream, the backtest,
+        // /predict and the per-symbol model directory) can read it off any IModel without
+        // knowing whether it is linear or an MLP. The defaults are empty: a model that records
+        // none of this -- an SgdRegressor, which is folded to a LinearModel before serving, or
+        // a file written before a given field existed -- reads as "unknown", which every caller
+        // already treats as "use what I was given".
+        [[nodiscard]] virtual const std::vector<std::string> &feature_names() const
+        {
+            static const std::vector<std::string> empty;
+            return empty;
+        }
+        [[nodiscard]] virtual const std::string &symbol() const
+        {
+            static const std::string empty;
+            return empty;
+        }
+        [[nodiscard]] virtual const std::vector<std::pair<std::string, double>> &training_params() const
+        {
+            static const std::vector<std::pair<std::string, double>> empty;
+            return empty;
+        }
+        [[nodiscard]] virtual const std::string &timeframe() const
+        {
+            static const std::string empty;
+            return empty;
+        }
+
+        // Throws std::invalid_argument when the vector's feature set differs from the one the
+        // model was trained on. The default accepts anything; models that record a feature set
+        // override it. predict() stays permissive on its own, so this is the hook a serving
+        // path calls when a mismatched model should be refused rather than scored on a subset.
+        virtual void validate_schema(const FeatureVector &) const {}
     };
 }
 
