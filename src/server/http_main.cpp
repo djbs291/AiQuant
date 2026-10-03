@@ -21,11 +21,13 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 
 #include "fin/api/PredictService.hpp"
 #include "fin/api/ScenarioService.hpp"
 #include "fin/app/Json.hpp"
 #include "fin/app/ScenarioSerialization.hpp"
+#include "fin/server/RateLimiter.hpp"
 
 namespace
 {
@@ -44,6 +46,14 @@ namespace
         // Directory served over GET. Empty means static serving is off, which is the default:
         // a service that does not need it should not carry the extra attack surface.
         std::filesystem::path static_dir;
+        // Accepted API keys. Empty means authentication is off, which is the default and keeps
+        // the loopback dev workflow working; set one or more and every request but GET /health
+        // must present a known key in `X-API-Key` or `Authorization: Bearer`.
+        std::unordered_set<std::string> api_keys;
+        // Requests allowed per key (or, with auth off, per client address) in each rate_window.
+        // Zero means no limiting, the default.
+        std::size_t rate_limit = 0;
+        int rate_window_seconds = 60;
     };
 
     constexpr std::size_t kMaxHeaderBytes = 16 * 1024;
@@ -94,6 +104,9 @@ namespace
         std::string method;
         std::string path;
         std::string body;
+        // The credential presented, from `X-API-Key` or a `Authorization: Bearer <key>` header.
+        // Empty when neither was sent.
+        std::string api_key;
     };
 
     enum class ReadStatus
@@ -153,6 +166,20 @@ namespace
                 if (ec != std::errc{} || ptr != last)
                     return ReadStatus::Malformed;
                 content_length = parsed;
+            }
+            else if (strcasecmp(name.c_str(), "X-API-Key") == 0)
+            {
+                req.api_key = value;
+            }
+            else if (strcasecmp(name.c_str(), "Authorization") == 0 && req.api_key.empty())
+            {
+                // Accept `Bearer <key>`; the raw value otherwise, so a client may send either.
+                constexpr std::string_view bearer = "Bearer ";
+                if (value.size() > bearer.size() &&
+                    strncasecmp(value.c_str(), bearer.data(), bearer.size()) == 0)
+                    req.api_key = trim(value.substr(bearer.size()));
+                else
+                    req.api_key = value;
             }
         }
 
@@ -789,7 +816,8 @@ namespace
 
     void handle_request(const fin::api::ScenarioService &service,
                         const fin::api::PredictService &predictor,
-                        const Options &opts, int client)
+                        const Options &opts, const std::string &client_ip,
+                        fin::server::RateLimiter &limiter, int client)
     {
         SocketGuard guard(client);
 
@@ -811,8 +839,40 @@ namespace
 
         if (req.method == "GET" && req.path == "/health")
         {
+            // Open so a load balancer or uptime check can reach it without a key or spending
+            // rate budget. It reveals nothing but liveness.
             send_response(client, 200, "OK", "{\"status\": \"ok\"}\n");
             return;
+        }
+
+        // Authentication, when keys are configured. Checked before anything is parsed or served,
+        // so an unauthenticated caller cannot reach the scenario runner, the static files or the
+        // model. The key is compared whole; there is no prefix or scope scheme in the MVP.
+        if (!opts.api_keys.empty() &&
+            (req.api_key.empty() || opts.api_keys.find(req.api_key) == opts.api_keys.end()))
+        {
+            send_response(client, 401, "Unauthorized",
+                          json_error("Missing or invalid API key; send it in X-API-Key or Authorization: Bearer"),
+                          "application/json", "WWW-Authenticate: Bearer\r\n");
+            return;
+        }
+
+        // Rate limiting, when configured. Per key if the caller authenticated, otherwise per
+        // client address, so one noisy source cannot crowd out the rest. /health is already
+        // past us, so health checks never spend budget.
+        if (limiter.enabled())
+        {
+            const std::string &identity = req.api_key.empty() ? client_ip : req.api_key;
+            if (!limiter.allow(identity, fin::server::RateLimiter::Clock::now()))
+            {
+                const std::string retry_after =
+                    "Retry-After: " + std::to_string(limiter.window().count()) + "\r\n";
+                send_response(client, 429, "Too Many Requests",
+                              json_error("Rate limit exceeded; retry after " +
+                                         std::to_string(limiter.window().count()) + " seconds"),
+                              "application/json", retry_after);
+                return;
+            }
         }
 
         // Static files, when a directory was configured. Anything else GET falls through to
@@ -931,13 +991,20 @@ namespace
     void print_usage()
     {
         std::cerr << "Usage: aiquant_http [--port N] [--bind ADDR] [--root DIR] [--model FILE] [--static DIR]"
-                     " [--max-body BYTES] [--max-connections N]\n"
+                     " [--max-body BYTES] [--max-connections N] [--api-key KEY]... [--api-keys-file FILE]"
+                     " [--rate-limit N] [--rate-window SECONDS]\n"
                   << "  --bind             IPv4 address to listen on (default: 127.0.0.1; 0.0.0.0 for every interface)\n"
                   << "  --root             directory every file the service reads or writes must be under (default: cwd)\n"
                   << "  --model            default model for /predict and /signal\n"
                   << "  --static           directory served over GET (default: off)\n"
                   << "  --max-body         maximum request body in bytes (default: 1048576)\n"
-                  << "  --max-connections  requests served concurrently before 503 (default: 32)\n";
+                  << "  --max-connections  requests served concurrently before 503 (default: 32)\n"
+                  << "  --api-key          an accepted API key (repeatable); if any is set, every request but\n"
+                  << "                     GET /health needs one in X-API-Key or Authorization: Bearer (default: off)\n"
+                  << "  --api-keys-file    file of accepted keys, one per line (# comments and blank lines ignored)\n"
+                  << "  --rate-limit       requests allowed per key, or per client address when auth is off, in\n"
+                  << "                     each --rate-window; 0 disables limiting (default: 0)\n"
+                  << "  --rate-window      length of the rate-limit window in seconds (default: 60)\n";
     }
 
     bool parse_args(int argc, char **argv, Options &opts)
@@ -979,6 +1046,52 @@ namespace
                     opts.max_body = static_cast<std::size_t>(std::stoull(value));
                 else if (arg == "--max-connections")
                     opts.max_connections = static_cast<unsigned>(std::stoul(value));
+                else if (arg == "--api-key")
+                {
+                    // Repeatable: every --api-key adds one accepted credential.
+                    const std::string key = trim(value);
+                    if (key.empty())
+                    {
+                        std::cerr << "Empty value for --api-key\n";
+                        return false;
+                    }
+                    opts.api_keys.insert(key);
+                }
+                else if (arg == "--api-keys-file")
+                {
+                    std::ifstream in(value);
+                    if (!in)
+                    {
+                        std::cerr << "Cannot open --api-keys-file: " << value << "\n";
+                        return false;
+                    }
+                    std::string line;
+                    while (std::getline(in, line))
+                    {
+                        const std::string key = trim(line);
+                        if (!key.empty() && key.front() != '#') // blank lines and # comments skipped
+                            opts.api_keys.insert(key);
+                    }
+                    if (opts.api_keys.empty())
+                    {
+                        std::cerr << "No keys found in --api-keys-file: " << value << "\n";
+                        return false;
+                    }
+                }
+                else if (arg == "--rate-limit")
+                {
+                    opts.rate_limit = static_cast<std::size_t>(std::stoull(value));
+                }
+                else if (arg == "--rate-window")
+                {
+                    opts.rate_window_seconds = std::stoi(value);
+                    if (opts.rate_window_seconds <= 0)
+                    {
+                        std::cerr << "Invalid value for --rate-window (expected a positive number of seconds): "
+                                  << value << "\n";
+                        return false;
+                    }
+                }
                 else
                 {
                     std::cerr << "Unknown option " << arg << "\n";
@@ -1077,16 +1190,34 @@ int main(int argc, char **argv)
     std::cout << "AiQuant HTTP service listening on " << opts.bind << ":" << opts.port << "\n"
               << "  scenario root: " << opts.root << "\n"
               << "  max body: " << opts.max_body << " bytes, max concurrent requests: "
-              << opts.max_connections << std::endl;
+              << opts.max_connections << "\n"
+              << "  authentication: "
+              << (opts.api_keys.empty() ? "off (open)"
+                                        : (std::to_string(opts.api_keys.size()) + " API key(s)"))
+              << "\n"
+              << "  rate limit: "
+              << (opts.rate_limit == 0
+                      ? std::string("off")
+                      : (std::to_string(opts.rate_limit) + " req / " +
+                         std::to_string(opts.rate_window_seconds) + "s per " +
+                         (opts.api_keys.empty() ? "client" : "key")))
+              << std::endl;
+
+    if (opts.bind != "127.0.0.1" && opts.api_keys.empty())
+        std::cerr << "warning: listening on " << opts.bind
+                  << " with no --api-key; anyone who can reach this port can use it\n";
 
     const fin::api::ScenarioService service;
     // Stateless: it loads the model per request, so concurrent requests share it safely.
     const fin::api::PredictService predictor(opts.model_path);
+    fin::server::RateLimiter limiter(opts.rate_limit, std::chrono::seconds(opts.rate_window_seconds));
     std::atomic<unsigned> active{0};
 
     while (true)
     {
-        const int client = ::accept(server_fd, nullptr, nullptr);
+        sockaddr_in peer{};
+        socklen_t peer_len = sizeof(peer);
+        const int client = ::accept(server_fd, reinterpret_cast<sockaddr *>(&peer), &peer_len);
         if (client < 0)
         {
             if (errno == EINTR)
@@ -1094,6 +1225,11 @@ int main(int argc, char **argv)
             std::perror("accept");
             break;
         }
+
+        std::string client_ip;
+        char ip_buf[INET_ADDRSTRLEN] = {};
+        if (::inet_ntop(AF_INET, &peer.sin_addr, ip_buf, sizeof(ip_buf)))
+            client_ip = ip_buf;
 
         if (active.load() >= opts.max_connections)
         {
@@ -1104,9 +1240,10 @@ int main(int argc, char **argv)
 
         ++active;
         // ScenarioService is stateless and run_scenario only touches its arguments, so requests
-        // can be served concurrently. The thread owns the socket and closes it.
-        std::thread([client, &service, &predictor, &opts, &active] {
-            handle_request(service, predictor, opts, client); // owns and closes the socket
+        // can be served concurrently. The thread owns the socket and closes it. The limiter is
+        // internally synchronized, so sharing one across the threads is safe.
+        std::thread([client, client_ip, &service, &predictor, &opts, &limiter, &active] {
+            handle_request(service, predictor, opts, client_ip, limiter, client); // owns and closes the socket
             --active;
         }).detach();
     }
