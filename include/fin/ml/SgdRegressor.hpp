@@ -70,7 +70,7 @@ namespace fin::ml
         [[nodiscard]] LinearModel to_linear_model() const;
 
         [[nodiscard]] const SgdOptions &options() const noexcept { return options_; }
-        [[nodiscard]] const std::vector<std::string> &feature_names() const noexcept { return names_; }
+        [[nodiscard]] const std::vector<std::string> &feature_names() const noexcept override { return names_; }
         [[nodiscard]] const std::vector<double> &weights() const noexcept { return weights_; }
         [[nodiscard]] double bias() const noexcept { return bias_; }
         // Weight updates applied so far, which is also the t in the learning-rate schedule.

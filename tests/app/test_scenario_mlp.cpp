@@ -4,10 +4,12 @@
 #include <stdexcept>
 #include <string>
 
+#include "TestTempFiles.hpp"
 #include "app/TestScenarioHelpers.hpp"
 #include "fin/app/ScenarioConfigIO.hpp"
 #include "fin/app/ScenarioRunner.hpp"
 #include "fin/app/ScenarioSerialization.hpp"
+#include "fin/io/Options.hpp"
 #include "fin/ml/MlpRegressor.hpp"
 
 TEST_CASE("Scenario INI selects the MLP trainer and its knobs", "[app][mlp]")
@@ -75,29 +77,35 @@ TEST_CASE("run_scenario trains an MLP and reports it", "[app][mlp]")
     std::filesystem::remove(ticks);
 }
 
-TEST_CASE("run_scenario refuses model_out for an MLP", "[app][mlp]")
+TEST_CASE("run_scenario saves an MLP model and it reloads", "[app][mlp]")
 {
-    const auto ticks = scenario_test::write_temp_ticks_csv(64);
+    const auto ticks = scenario_test::write_temp_ticks_csv(256);
+    const auto model_path = test_files::temp_path("scenario_mlp_", ".csv");
 
     fin::app::ScenarioConfig cfg{};
     cfg.ticks_path = ticks.string();
     cfg.model = fin::app::ModelKind::Mlp;
-    cfg.model_output_path = "should_not_be_written.csv";
+    cfg.mlp.epochs = 50; // keep the test quick
+    cfg.model_output_path = model_path.string();
 
-    std::string message;
-    try
-    {
-        fin::app::run_scenario(cfg);
-    }
-    catch (const std::invalid_argument &ex)
-    {
-        message = ex.what();
-    }
-    REQUIRE(message.find("model_out is not supported for model = mlp") != std::string::npos);
-    // Refused before anything was written.
-    REQUIRE_FALSE(std::filesystem::exists("should_not_be_written.csv"));
+    const auto result = fin::app::run_scenario(cfg);
+    REQUIRE(result.model_saved);
+    REQUIRE(std::filesystem::exists(model_path));
+
+    // The file is an MLP file, and it loads through the polymorphic entry point with its
+    // metadata intact.
+    std::string type;
+    REQUIRE(fin::ml::peek_model_type(model_path.string(), type));
+    REQUIRE(type == "mlp");
+
+    std::string error;
+    auto loaded = fin::ml::load_model_file(model_path.string(), error);
+    REQUIRE(loaded != nullptr);
+    REQUIRE(loaded->timeframe() == fin::io::timeframe_token(cfg.timeframe));
+    REQUIRE(loaded->feature_names() == result.features);
 
     std::filesystem::remove(ticks);
+    std::filesystem::remove(model_path);
 }
 
 TEST_CASE("Online updating with the MLP is refused", "[app][mlp]")

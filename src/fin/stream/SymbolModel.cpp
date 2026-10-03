@@ -22,7 +22,7 @@ namespace fin::stream
         }
     } // namespace
 
-    bool symbol_model_from(std::shared_ptr<fin::ml::LinearModel> model, const ModelOverrides &overrides,
+    bool symbol_model_from(std::shared_ptr<fin::ml::IModel> model, const ModelOverrides &overrides,
                            const fin::indicators::FeatureParams &base, SymbolModel &out, std::string &error)
     {
         SymbolModel resolved;
