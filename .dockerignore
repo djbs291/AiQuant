@@ -1,0 +1,12 @@
+# Keep the build context small and the image build reproducible: never copy local build trees,
+# VCS metadata or editor cruft into the image.
+build/
+build-*/
+/tmp/
+.git/
+.github/
+.vscode/
+*.o
+*.so
+__pycache__/
+.DS_Store
