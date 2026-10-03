@@ -205,7 +205,17 @@ Every field is optional. Supply `prediction` to evaluate the rules against a num
 
 The files a scenario names are held to `--root` too, on both endpoints: its `ticks` file (`403` outside the root, `404` if missing) and any `model_out` (`403` outside, `404` if the directory does not exist). Relative paths inside a scenario resolve against the server's **working directory**, exactly as they do on the CLI, and are then checked against the root — so `scenarios/mvp.ini`, whose `ticks = scenarios/ticks_mvp.csv`, runs with `--root scenarios` from the repository root. A `model_out` that is itself a symlink is refused wherever it points. Writing a model inside the root is allowed, so a model trained through `/run-config` can be served by `/predict`.
 
-The service listens on **`127.0.0.1` by default**. It has no TLS and no authentication, so exposing it is a decision to make explicitly with `--bind 0.0.0.0` (or a specific address), preferably behind a proxy that adds both. Before 2026-09-27 it listened on every interface.
+The service listens on **`127.0.0.1` by default**. It has **no TLS** — terminate it at a reverse proxy — so exposing it is a decision to make explicitly with `--bind 0.0.0.0` (or a specific address). Before 2026-09-27 it listened on every interface.
+
+**Authentication and rate limiting** are off by default (so the loopback dev workflow is unchanged) and turned on per flag:
+
+```bash
+# require a key on every request but GET /health, and cap each key to 60 requests/minute
+./build/aiquant_http --root scenarios --api-key "$MY_KEY" --rate-limit 60
+curl -X POST http://localhost:8080/predict -H "X-API-Key: $MY_KEY" -d '{"features":{"close":100,"rsi":55}}'
+```
+
+With one or more `--api-key` set (or `--api-keys-file`, one key per line), every request except `GET /health` must present a known key in `X-API-Key` or `Authorization: Bearer`; missing or wrong is `401`. `--rate-limit N` caps requests to `N` per `--rate-window` seconds (default 60) **per key**, or per client address when auth is off; over quota is `429` with `Retry-After`. `GET /health` is exempt from both so a load balancer can poll it.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -216,8 +226,23 @@ The service listens on **`127.0.0.1` by default**. It has no TLS and no authenti
 | `--static` | off | directory served over `GET`; without it the service stays POST-only |
 | `--max-body` | 1048576 | maximum request body in bytes |
 | `--max-connections` | 32 | requests served concurrently before answering 503 |
+| `--api-key` | none | an accepted API key (repeatable); any set turns authentication on |
+| `--api-keys-file` | none | file of accepted keys, one per line (`#` comments and blank lines ignored) |
+| `--rate-limit` | 0 (off) | requests allowed per key (or per client address with auth off) in each window |
+| `--rate-window` | 60 | length of the rate-limit window, in seconds |
 
-Status codes: `200` on success, `400` for a malformed request or unparsable INI, `403` for a path outside `--root`, `404` for a missing file or unknown endpoint, `405` for a method other than POST (except `GET /health` and, with `--static`, GET of a served file), `413` for an oversized body, `422` for a valid scenario the engine cannot run (too few candles, say), `503` when the concurrency limit is reached, and `500` otherwise.
+Status codes: `200` on success, `400` for a malformed request or unparsable INI, `401` for a missing or invalid API key, `403` for a path outside `--root`, `404` for a missing file or unknown endpoint, `405` for a method other than POST (except `GET /health` and, with `--static`, GET of a served file), `413` for an oversized body, `422` for a valid scenario the engine cannot run (too few candles, say), `429` when the rate limit is exceeded, `503` when the concurrency limit is reached, and `500` otherwise.
+
+### Running in Docker
+
+A `Dockerfile` builds a small image of the service (Python bindings off, bundled Catch2, so the build pulls no extra dependencies over the network):
+
+```bash
+docker build -t aiquant-http .
+docker run --rm -p 8080:8080 -v "$PWD/scenarios:/data:ro" aiquant-http --api-key "$MY_KEY" --rate-limit 60
+```
+
+The image binds `0.0.0.0` inside the container and holds every file to the mounted `/data` (the default `--root`). It runs as a non-root user and has no TLS of its own: keep the published port behind a proxy or load balancer that terminates TLS.
 
 ### Serving the dashboard
 
@@ -231,4 +256,4 @@ then open <http://localhost:8080/>. The page is described in [`examples/README.m
 
 The serving path is narrow on purpose: paths are confined to `DIR` the same way `/run-file` is confined to `--root` (a symlink pointing out is refused, not followed), percent-encoded paths are rejected rather than decoded, only a whitelist of extensions is served — `.svg` is excluded because SVG can carry script — dotfiles are refused, directories are never listed, and responses carry `nosniff` and a `default-src 'self'` policy. Asking for an API route with `GET` still answers `405`, not `404`. The server also refuses at startup to serve a directory that contains `--root`, which would otherwise publish your scenarios and models.
 
-Each connection is served on its own thread. The service has no TLS and no authentication, and the `ticks` path inside a scenario is not restricted by `--root`, so keep it on a trusted network (see `docs/ProjectStatus.md`).
+Each connection is served on its own thread. The service has no TLS of its own — put it behind a proxy that terminates TLS, and turn on `--api-key` (and optionally `--rate-limit`) before exposing it (see `docs/ProjectStatus.md`).

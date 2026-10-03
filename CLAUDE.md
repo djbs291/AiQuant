@@ -49,11 +49,16 @@ cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-o
 # and POST /predict + /signal, which take JSON (see README). --root defaults to the cwd, and
 # every file the service touches must be under it, including a scenario's ticks and model_out
 # (those resolve against the cwd, as on the CLI, then get checked). Listens on 127.0.0.1
-# unless --bind says otherwise: there is no TLS and no auth.
+# unless --bind says otherwise. There is no TLS (terminate it at a proxy). Authentication and
+# rate limiting are off by default: set --api-key (repeatable) or --api-keys-file to require a
+# key in X-API-Key or Authorization: Bearer on every request but GET /health, and --rate-limit
+# N [--rate-window SECONDS] to cap requests per key (per client address when auth is off).
 ./build/aiquant_http --port 8080 --root scenarios --model model.csv [--static examples/dashboard] \
-  [--bind 127.0.0.1] [--max-body 1048576] [--max-connections 32]
+  [--bind 127.0.0.1] [--max-body 1048576] [--max-connections 32] \
+  [--api-key KEY ...] [--api-keys-file FILE] [--rate-limit N] [--rate-window SECONDS]
 # --static is off unless given; it serves GET from that directory only (whitelisted extensions,
 # no dotfiles, no listings, symlinks out refused) and never shadows an API route.
+# A Dockerfile builds the service image (Python off, bundled Catch2, so the build needs no network).
 python3 tests/http/smoke_test.py   # endpoint + status-code smoke test, also run by ci.yml (not by ctest)
 
 # Python: use the same interpreter CMake found (printed as "Found Python3" at configure time)

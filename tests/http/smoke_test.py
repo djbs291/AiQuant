@@ -51,10 +51,10 @@ def wait_until_ready(port, proc, timeout=15.0):
     raise RuntimeError("server did not start listening in time")
 
 
-def request(port, method, path, body=None):
+def request(port, method, path, body=None, headers=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
     try:
-        conn.request(method, path, body=body)
+        conn.request(method, path, body=body, headers=headers or {})
         response = conn.getresponse()
         return response.status, response.read().decode()
     finally:
@@ -263,6 +263,67 @@ def check_scenario_paths(tmp):
         stop_server(proc)
 
 
+def check_auth(tmp):
+    """With --api-key set, every request but GET /health needs a known key."""
+    root = os.path.join(tmp, "scenarios")  # created by main() before this runs
+    body = json.dumps({"features": {"close": 100.0, "rsi": 50.0}, "prediction": 0.1})
+
+    port, proc = start_server(["--root", root, "--api-key", "secret123", "--api-key", "second"])
+    try:
+        # /health stays open so load balancers can reach it.
+        check("GET /health without a key", request(port, "GET", "/health")[0], 200)
+        # Everything else is refused without a valid key.
+        check("POST /signal without a key", request(port, "POST", "/signal", body)[0], 401)
+        check("POST /signal wrong key",
+              request(port, "POST", "/signal", body, {"X-API-Key": "nope"})[0], 401)
+        # Either header carries it, and either configured key works.
+        check("POST /signal X-API-Key",
+              request(port, "POST", "/signal", body, {"X-API-Key": "secret123"})[0], 200)
+        check("POST /signal Authorization: Bearer",
+              request(port, "POST", "/signal", body, {"Authorization": "Bearer secret123"})[0], 200)
+        check("POST /signal second key",
+              request(port, "POST", "/signal", body, {"X-API-Key": "second"})[0], 200)
+        assert proc.poll() is None, "server died during the auth checks"
+    finally:
+        stop_server(proc)
+
+    # An --api-keys-file is an alternative to repeated --api-key.
+    keys_file = os.path.join(tmp, "keys.txt")
+    with open(keys_file, "w") as f:
+        f.write("# keys\nfromfile\n\n")
+    port, proc = start_server(["--root", root, "--api-keys-file", keys_file])
+    try:
+        check("POST /signal key from file",
+              request(port, "POST", "/signal", body, {"X-API-Key": "fromfile"})[0], 200)
+        check("POST /signal key not in file",
+              request(port, "POST", "/signal", body, {"X-API-Key": "secret123"})[0], 401)
+    finally:
+        stop_server(proc)
+
+
+def check_rate_limit(tmp):
+    """--rate-limit caps requests per window; /health is exempt."""
+    root = os.path.join(tmp, "scenarios")
+    body = json.dumps({"features": {"close": 100.0, "rsi": 50.0}, "prediction": 0.1})
+
+    # Two per 60s, auth off, so the limiter keys on the client address (all from 127.0.0.1 here).
+    port, proc = start_server(["--root", root, "--rate-limit", "2", "--rate-window", "60"])
+    try:
+        check("rate-limited req 1", request(port, "POST", "/signal", body)[0], 200)
+        check("rate-limited req 2", request(port, "POST", "/signal", body)[0], 200)
+        check("rate-limited req 3 (over quota)", request(port, "POST", "/signal", body)[0], 429)
+        # Health is never rate-limited.
+        check("GET /health not rate-limited", request(port, "GET", "/health")[0], 200)
+        assert proc.poll() is None, "server died during the rate-limit checks"
+    finally:
+        stop_server(proc)
+
+    # Rejecting a positive but zero-second window at startup.
+    result = subprocess.run([SERVER, "--port", str(free_port()), "--root", root, "--rate-window", "0"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+    check("--rate-window 0 exit code", result.returncode, 2)
+
+
 def check_bind(tmp):
     """Loopback by default; --bind takes an IPv4 address and refuses anything else."""
     port, proc = start_server(["--root", tmp, "--bind", "127.0.0.1"])
@@ -458,6 +519,8 @@ def main():
         check_static(tmp)
         check_scenario_paths(tmp)
         check_bind(tmp)
+        check_auth(tmp)
+        check_rate_limit(tmp)
 
     print("aiquant_http OK")
     return 0
