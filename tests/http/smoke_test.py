@@ -324,6 +324,53 @@ def check_rate_limit(tmp):
     check("--rate-window 0 exit code", result.returncode, 2)
 
 
+def check_run_inline(tmp):
+    """POST /run-inline carries the tick data in the request, not from a file under --root."""
+    root = os.path.join(tmp, "scenarios")
+    ticks_path = os.path.join(tmp, "inline_ticks.csv")
+    write_ticks(ticks_path)
+    with open(ticks_path) as f:
+        csv = f.read()
+
+    port, proc = start_server(["--root", root])
+    try:
+        body = json.dumps({"ticks_csv": csv, "config": "tf = M1\nmodel = ridge\n"})
+        status, text = request(port, "POST", "/run-inline", body)
+        check("POST /run-inline", status, 200)
+        payload = json.loads(text)
+        assert payload["candles"] == TICKS, payload["candles"]
+        assert "metrics" in payload and "pnl" in payload["metrics"], payload
+        # The server's temp path never reaches the reply.
+        assert payload["ticks_path"] == "(inline)", payload["ticks_path"]
+
+        # An MLP scenario runs inline too.
+        mlp_body = json.dumps({"ticks_csv": csv, "config": "tf = M1\nmodel = mlp\nmlp_epochs = 20\n"})
+        check("POST /run-inline (mlp)", request(port, "POST", "/run-inline", mlp_body)[0], 200)
+
+        # ticks_csv is required.
+        check("POST /run-inline (no ticks_csv)",
+              request(port, "POST", "/run-inline", json.dumps({"config": "tf = M1\n"}))[0], 400)
+        # Setting ticks in the config collides with the injected one and is refused.
+        check("POST /run-inline (config also sets ticks)",
+              request(port, "POST", "/run-inline",
+                      json.dumps({"ticks_csv": csv, "config": "ticks = x.csv\n"}))[0], 400)
+        # model_out has nowhere to go on a stateless call.
+        check("POST /run-inline (model_out refused)",
+              request(port, "POST", "/run-inline",
+                      json.dumps({"ticks_csv": csv, "config": "model_out = m.csv\n"}))[0], 400)
+        # Not valid JSON.
+        check("POST /run-inline (invalid JSON)", request(port, "POST", "/run-inline", "{not json")[0], 400)
+        # Too few candles is still a 422, as on the other scenario endpoints.
+        short_csv = "\n".join(csv.splitlines()[:6]) + "\n"
+        check("POST /run-inline (too few candles)",
+              request(port, "POST", "/run-inline", json.dumps({"ticks_csv": short_csv, "config": "tf = M1\n"}))[0], 422)
+        # GET is not allowed.
+        check("GET /run-inline", request(port, "GET", "/run-inline")[0], 405)
+        assert proc.poll() is None, "server died during the inline checks"
+    finally:
+        stop_server(proc)
+
+
 def check_bind(tmp):
     """Loopback by default; --bind takes an IPv4 address and refuses anything else."""
     port, proc = start_server(["--root", tmp, "--bind", "127.0.0.1"])
@@ -518,6 +565,7 @@ def main():
 
         check_static(tmp)
         check_scenario_paths(tmp)
+        check_run_inline(tmp)
         check_bind(tmp)
         check_auth(tmp)
         check_rate_limit(tmp)

@@ -99,6 +99,38 @@ namespace
         std::filesystem::path path_;
     };
 
+    // Writes `body` to a uniquely-named temp file with the given suffix and deletes it when the
+    // scope ends. Used by /run-inline, which receives the tick data and scenario in the request
+    // and needs them on disk briefly for the file-based loader and tick reader.
+    class TempFile
+    {
+    public:
+        TempFile(std::string_view suffix, const std::string &body)
+        {
+            static std::atomic<unsigned long long> counter{0};
+            const auto ts = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+            path_ = std::filesystem::temp_directory_path() /
+                    ("aiquant_http_" + std::to_string(::getpid()) + "_" + std::to_string(ts) + "_" +
+                     std::to_string(counter++) + std::string(suffix));
+            std::ofstream out(path_);
+            out << body;
+        }
+
+        ~TempFile()
+        {
+            std::error_code ec;
+            std::filesystem::remove(path_, ec);
+        }
+
+        TempFile(const TempFile &) = delete;
+        TempFile &operator=(const TempFile &) = delete;
+
+        std::string string() const { return path_.string(); }
+
+    private:
+        std::filesystem::path path_;
+    };
+
     struct Request
     {
         std::string method;
@@ -461,7 +493,8 @@ namespace
     // still answers 405 rather than "no such file".
     bool is_api_route(std::string_view path)
     {
-        return path == "/run-file" || path == "/run-config" || path == "/predict" || path == "/signal";
+        return path == "/run-file" || path == "/run-config" || path == "/run-inline" ||
+               path == "/predict" || path == "/signal";
     }
 
     void handle_static(int client, const Options &opts, const std::string &request_path)
@@ -814,6 +847,83 @@ namespace
         send_response(client, 200, "OK", out.str());
     }
 
+    // POST /run-inline: the data comes in the request, not from a file under --root, so a remote
+    // caller can back-test its own ticks without any access to the server's filesystem. Body is
+    // JSON: {"ticks_csv": "<csv>", "config": "<scenario INI, without a ticks key>"}. The CSV and
+    // the assembled INI are written to temp files for the file-based loader and tick reader, and
+    // both are deleted when the scope ends. model_out is refused: a stateless call has nowhere to
+    // hand a file back, and allowing a server-side write would be a containment hole.
+    void handle_run_inline(int client, const fin::api::ScenarioService &service, const std::string &body)
+    {
+        if (body.empty())
+        {
+            send_response(client, 400, "Bad Request", json_error("Empty request body"));
+            return;
+        }
+
+        std::string error;
+        auto parsed = fin::app::json::parse(body, error);
+        if (!parsed)
+        {
+            send_response(client, 400, "Bad Request", json_error("Invalid JSON: " + error));
+            return;
+        }
+        if (!parsed->is_object())
+        {
+            send_response(client, 400, "Bad Request", json_error("Body must be a JSON object"));
+            return;
+        }
+
+        const auto *ticks_value = parsed->find("ticks_csv");
+        if (ticks_value == nullptr || !ticks_value->is_string() || ticks_value->as_string().empty())
+        {
+            send_response(client, 400, "Bad Request",
+                          json_error("ticks_csv is required and must be a non-empty CSV string"));
+            return;
+        }
+        const std::string &ticks_csv = ticks_value->as_string();
+
+        std::string config_ini;
+        if (!read_optional_string(*parsed, "config", config_ini, error))
+        {
+            send_response(client, 400, "Bad Request", json_error(error));
+            return;
+        }
+
+        // The data goes to a temp CSV; the scenario is that CSV plus the caller's config. The
+        // injected `ticks` is the authoritative one -- if the caller also set it, the loader's
+        // duplicate-key check rejects the scenario, which is the right answer.
+        TempFile ticks_file(".csv", ticks_csv);
+        const std::string ini = config_ini + "\nticks = " + ticks_file.string() + "\n";
+        TempFile ini_file(".ini", ini);
+
+        fin::app::ScenarioConfig cfg{};
+        try
+        {
+            cfg = service.load_file(ini_file.string());
+        }
+        catch (const std::exception &ex)
+        {
+            send_response(client, 400, "Bad Request", json_error(ex.what()));
+            return;
+        }
+
+        if (cfg.model_output_path)
+        {
+            send_response(client, 400, "Bad Request",
+                          json_error("model_out is not supported on /run-inline: the call is stateless"));
+            return;
+        }
+
+        const auto result = service.run(cfg); // invalid_argument -> 400, runtime_error -> 422 upstream
+
+        // Keep the server's temp path out of the reply: the data was inline, so there is no tick
+        // file for the caller to refer to.
+        fin::app::ScenarioConfig display = cfg;
+        display.ticks_path = "(inline)";
+        send_response(client, 200, "OK", fin::app::scenario_result_to_json(display, result));
+    }
+
     void handle_request(const fin::api::ScenarioService &service,
                         const fin::api::PredictService &predictor,
                         const Options &opts, const std::string &client_ip,
@@ -958,6 +1068,10 @@ namespace
 
                 const auto result = service.run(pinned);
                 send_response(client, 200, "OK", fin::app::scenario_result_to_json(cfg, result));
+            }
+            else if (req.path == "/run-inline")
+            {
+                handle_run_inline(client, service, req.body);
             }
             else if (req.path == "/predict")
             {

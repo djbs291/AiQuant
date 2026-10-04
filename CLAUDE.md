@@ -46,6 +46,7 @@ cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-o
 ./build/aiquant backtest ticks.csv --model-linear model.csv
 
 # HTTP: GET /health; POST /run-file (body = INI path under --root), POST /run-config (raw INI),
+# POST /run-inline (JSON {ticks_csv, config}: data in the request, no file under --root needed),
 # and POST /predict + /signal, which take JSON (see README). --root defaults to the cwd, and
 # every file the service touches must be under it, including a scenario's ticks and model_out
 # (those resolve against the cwd, as on the CLI, then get checked). Listens on 127.0.0.1
