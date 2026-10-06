@@ -51,7 +51,8 @@ cmake --build /tmp/aiquant-asan && ctest --test-dir /tmp/aiquant-asan --output-o
 # every file the service touches must be under it, including a scenario's ticks and model_out
 # (those resolve against the cwd, as on the CLI, then get checked). Listens on 127.0.0.1
 # unless --bind says otherwise. There is no TLS (terminate it at a proxy). Authentication and
-# rate limiting are off by default: set --api-key (repeatable) or --api-keys-file to require a
+# rate limiting are off by default: set --api-key (repeatable), --api-keys-file, or the
+# AIQUANT_API_KEYS env var (comma-separated, how a host injects the secret) to require a
 # key in X-API-Key or Authorization: Bearer on every request but GET /health, and --rate-limit
 # N [--rate-window SECONDS] to cap requests per key (per client address when auth is off).
 ./build/aiquant_http --port 8080 --root scenarios --model model.csv [--static examples/dashboard] \

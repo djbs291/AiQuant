@@ -77,11 +77,15 @@ def check(label, got, expected):
     print(f"  ok  {label} -> {got}")
 
 
-def start_server(args):
+def start_server(args, env=None):
     """Starts the server on a free port and waits for it to listen."""
     port = free_port()
+    child_env = None
+    if env is not None:
+        child_env = dict(os.environ)
+        child_env.update(env)
     proc = subprocess.Popen([SERVER, "--port", str(port)] + args,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=child_env)
     try:
         wait_until_ready(port, proc)
     except Exception:
@@ -297,6 +301,16 @@ def check_auth(tmp):
               request(port, "POST", "/signal", body, {"X-API-Key": "fromfile"})[0], 200)
         check("POST /signal key not in file",
               request(port, "POST", "/signal", body, {"X-API-Key": "secret123"})[0], 401)
+    finally:
+        stop_server(proc)
+
+    # Keys can also arrive in the AIQUANT_API_KEYS env var (how a host injects the secret).
+    port, proc = start_server(["--root", root], env={"AIQUANT_API_KEYS": "envkey1,envkey2"})
+    try:
+        check("POST /signal key from env",
+              request(port, "POST", "/signal", body, {"X-API-Key": "envkey2"})[0], 200)
+        check("POST /signal key not in env",
+              request(port, "POST", "/signal", body, {"X-API-Key": "nope"})[0], 401)
     finally:
         stop_server(proc)
 
