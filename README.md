@@ -249,10 +249,10 @@ A `Dockerfile` builds a small image of the service (Python bindings off, bundled
 
 ```bash
 docker build -t aiquant-http .
-docker run --rm -p 8080:8080 -v "$PWD/scenarios:/data:ro" aiquant-http --api-key "$MY_KEY" --rate-limit 60
+docker run --rm -p 8080:8080 -e AIQUANT_API_KEYS="$MY_KEY" aiquant-http
 ```
 
-The image binds `0.0.0.0` inside the container and holds every file to the mounted `/data` (the default `--root`). It runs as a non-root user and has no TLS of its own: keep the published port behind a proxy or load balancer that terminates TLS.
+The image binds `0.0.0.0` inside the container, rate-limits, and holds every file to the mounted `/data` (the default `--root`); the API key comes from `AIQUANT_API_KEYS`. It runs as a non-root user and has no TLS of its own: keep the published port behind a proxy or load balancer that terminates TLS. To change the flags, override the whole command (`docker run ... aiquant-http aiquant_http --bind 0.0.0.0 --port 8080 --root /data ...`).
 
 **Hosting it online:** [`docs/DEPLOY.md`](docs/DEPLOY.md) is a step-by-step guide. The repo ships a [`render.yaml`](render.yaml) Blueprint for [Render](https://render.com) (the lowest-effort host — it builds the Dockerfile from GitHub and serves it over HTTPS, free to start); the guide also covers Fly.io, Google Cloud Run and a self-managed VPS with Caddy.
 

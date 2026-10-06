@@ -121,9 +121,10 @@ Most control, flat ~$4–6/mo, most work. Rent a small Linux box, install Docker
 ```bash
 # on the VPS, with a domain's A record pointing at it:
 docker build -t aiquant-http https://github.com/djbs291/AiQuant.git
+# The image's default command already binds 0.0.0.0, rate-limits, and roots at /data; the key
+# comes from the env var. Only -p and -e are needed.
 docker run -d --restart unless-stopped -p 127.0.0.1:8080:8080 \
-  -e AIQUANT_API_KEYS=$(openssl rand -hex 24) --name aiquant aiquant-http \
-  --bind 0.0.0.0 --port 8080 --root /data --rate-limit 120
+  -e AIQUANT_API_KEYS=$(openssl rand -hex 24) --name aiquant aiquant-http
 ```
 
 Then a `Caddyfile`:
