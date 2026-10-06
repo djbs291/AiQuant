@@ -17,12 +17,15 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "fin/api/PredictService.hpp"
 #include "fin/api/ScenarioService.hpp"
