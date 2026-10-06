@@ -46,7 +46,9 @@ WORKDIR /data
 EXPOSE 8080
 
 ENTRYPOINT ["aiquant_http"]
-# Bind every interface inside the container (so the published port reaches it) and hold every
-# file the service touches to the mounted /data. Append flags after the image name to extend
-# this, e.g. --api-key, --rate-limit, --model, --static.
-CMD ["--bind", "0.0.0.0", "--port", "8080", "--root", "/data"]
+# Production-ready defaults: bind every interface inside the container (so the published port
+# reaches it), hold every file the service touches to the mounted /data, and rate-limit. The API
+# key comes from the AIQUANT_API_KEYS env var, not the command line. Override by passing your own
+# flags after the image name (that replaces this whole CMD), e.g.
+#   docker run aiquant-http --bind 0.0.0.0 --port 8080 --root /data --model /data/model.csv
+CMD ["--bind", "0.0.0.0", "--port", "8080", "--root", "/data", "--rate-limit", "120", "--rate-window", "60"]
