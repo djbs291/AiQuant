@@ -1,0 +1,34 @@
+# Render Blueprint for the AiQuant HTTP service.
+#
+# Render (https://render.com) reads this file, builds the Dockerfile, and serves the result over
+# HTTPS at a https://<name>.onrender.com URL -- no server to manage, TLS handled for you.
+#
+# To deploy: push this to GitHub, then in the Render dashboard choose "New +" -> "Blueprint" and
+# pick this repository. Set the AIQUANT_API_KEYS secret when prompted. See docs/DEPLOY.md for the
+# full walkthrough.
+services:
+  - type: web
+    name: aiquant-http
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # The free plan is enough to validate; it spins the service down after ~15 min idle, so the
+    # first request after a pause takes a few seconds to wake. Move to "starter" (~$7/mo) to stop
+    # it sleeping once you have traffic.
+    plan: free
+    # Pick the region closest to your users; frankfurt is the European one.
+    region: frankfurt
+    # Render polls this to know the service is up. It is exempt from auth, so the probe needs no
+    # key, and it is never rate-limited.
+    healthCheckPath: /health
+    # Override the Dockerfile's default CMD to turn on rate limiting in production. The API key
+    # comes from the AIQUANT_API_KEYS environment variable below, never the command line.
+    dockerCommand: --bind 0.0.0.0 --port 8080 --root /data --rate-limit 120 --rate-window 60
+    envVars:
+      # Tell Render which port the container listens on (it matches --port above).
+      - key: PORT
+        value: "8080"
+      # Accepted API key(s), comma-separated. sync:false keeps the value out of git -- you set it
+      # in the Render dashboard (generate one with: openssl rand -hex 24). Without it the service
+      # would run open; the dashboard will prompt you for a value on first deploy.
+      - key: AIQUANT_API_KEYS
+        sync: false
