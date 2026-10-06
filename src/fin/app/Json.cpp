@@ -4,6 +4,8 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <optional>
+#include <utility>
 
 namespace fin::app::json
 {

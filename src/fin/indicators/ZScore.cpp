@@ -1,5 +1,8 @@
 #include "fin/indicators/ZScore.hpp"
 #include <algorithm>
+#include <cmath>
+#include <optional>
+#include <vector>
 
 namespace fin::indicators
 {

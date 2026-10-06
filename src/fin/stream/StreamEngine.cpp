@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
+#include <memory>
+#include <optional>
+#include <vector>
 
 namespace fin::stream
 {

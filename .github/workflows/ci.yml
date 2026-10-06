@@ -126,3 +126,29 @@ jobs:
             build/Testing/Temporary/LastTest.log
             build/**/*.log
             build/**/*.xml
+
+  docker-build:
+    name: Docker image (Debian GCC, Release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Builds the service image exactly as a host like Render does: Release + GCC on Debian
+      # bookworm. This is the one job that compiles the project in Release on Linux, so it
+      # catches portability breaks the Debug jobs miss -- e.g. a header that only newer GCC and
+      # Clang pull in transitively. (That class broke a deploy once; this stops it recurring.)
+      - name: Build the service image
+        run: docker build -t aiquant-http .
+
+      - name: Smoke-check the built image
+        run: |
+          docker run -d --rm -p 8080:8080 -e AIQUANT_API_KEYS=ci-test-key --name aiquant aiquant-http
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          docker logs aiquant || true
+          docker stop aiquant || true
+          test "$ok" = "1"

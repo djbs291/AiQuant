@@ -1,5 +1,6 @@
 #include "fin/io/Resampler.hpp"
 #include <chrono>
+#include <optional>
 
 namespace fin::io
 {

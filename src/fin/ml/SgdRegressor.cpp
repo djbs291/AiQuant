@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "fin/ml/FeatureVector.hpp"
 

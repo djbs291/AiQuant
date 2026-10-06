@@ -1,6 +1,8 @@
 #include "fin/indicators/Stochastic.hpp"
 #include <algorithm>
 #include <limits>
+#include <optional>
+#include <vector>
 
 namespace fin::indicators
 {

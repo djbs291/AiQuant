@@ -11,6 +11,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "fin/app/ScenarioUtils.hpp"
 #include "fin/indicators/FeatureSpec.hpp" // find_feature: reject unknown feature names

@@ -1,4 +1,5 @@
 #include "fin/app/ScenarioUtils.hpp"
+#include <optional>
 
 namespace fin::app
 {

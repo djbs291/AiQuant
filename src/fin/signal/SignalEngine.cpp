@@ -1,4 +1,5 @@
 #include "fin/signal/SignalEngine.hpp"
+#include <optional>
 
 namespace fin::signal
 {

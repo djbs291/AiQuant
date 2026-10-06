@@ -10,3 +10,7 @@ build-cov/
 
 # Test fixtures written by older test runs (tests now use the system temp dir)
 /ticks_*.csv
+
+# Local secrets (e.g. a generated API key) — never commit
+AI_Quant_API.txt
+*.key
