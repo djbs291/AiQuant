@@ -4,6 +4,8 @@
 #include <chrono>
 #include <memory>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include "fin/ml/FeatureVector.hpp"
 #include "fin/ml/IModel.hpp"

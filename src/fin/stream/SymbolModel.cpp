@@ -1,6 +1,9 @@
 #include "fin/stream/SymbolModel.hpp"
 
 #include <sstream>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace fin::stream
 {

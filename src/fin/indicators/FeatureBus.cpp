@@ -1,6 +1,10 @@
 #include "fin/indicators/FeatureBus.hpp"
 
 #include <stdexcept>
+#include <memory>
+#include <optional>
+#include <utility>
+#include <vector>
 
 namespace fin::indicators
 {

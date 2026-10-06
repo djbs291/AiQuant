@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "fin/ml/FeatureVector.hpp"
 

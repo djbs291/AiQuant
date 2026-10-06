@@ -2,6 +2,9 @@
 
 #include <exception>
 #include <utility>
+#include <memory>
+#include <optional>
+#include <vector>
 
 #include "fin/ml/FeatureVector.hpp"
 

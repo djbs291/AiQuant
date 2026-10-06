@@ -1,4 +1,6 @@
 #include "fin/indicators/Momentum.hpp"
+#include <optional>
+#include <vector>
 
 namespace fin::indicators
 {

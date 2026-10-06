@@ -1,4 +1,5 @@
 #include "fin/backtest/Backtester.hpp"
+#include <optional>
 
 namespace fin::backtest
 {

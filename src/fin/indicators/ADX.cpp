@@ -1,6 +1,9 @@
 #include "fin/indicators/ADX.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <optional>
+#include <vector>
 
 namespace fin::indicators
 {

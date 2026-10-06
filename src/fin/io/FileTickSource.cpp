@@ -9,6 +9,9 @@
 #include <string_view>
 #include <chrono>
 #include <cctype>
+#include <algorithm>
+#include <optional>
+#include <utility>
 
 using namespace std::string_view_literals;
 

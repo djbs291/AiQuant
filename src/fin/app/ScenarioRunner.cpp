@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "fin/app/ScenarioUtils.hpp"
 #include "fin/indicators/FeatureBus.hpp"

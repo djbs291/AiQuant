@@ -127,7 +127,7 @@ Adding a **feature** is a different list: register it in `feature_catalog()` (`s
 ## CI
 
 GitHub Actions:
-- `ci.yml`: Debug build + ctest, on **Ubuntu and macOS** (the macOS job arrived with PR #15).
+- `ci.yml`: Debug build + ctest on **Ubuntu and macOS** (the macOS job arrived with PR #15), plus a **`docker-build`** job that builds the `Dockerfile` — the one job compiling the project in **Release on Linux (Debian GCC)**, so it catches portability breaks the Debug jobs miss (e.g. a header only newer GCC/Clang pull in transitively).
 - `sanitizers.yml`: ASan/UBSan.
 - `coverage.yml`: gcov/lcov artifact.
 - `release.yml`: on `v*.*.*` tags, packages `build-rel` as a tarball.

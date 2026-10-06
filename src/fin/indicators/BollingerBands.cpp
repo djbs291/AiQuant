@@ -1,4 +1,7 @@
 #include "fin/indicators/BollingerBands.hpp"
+#include <cmath>
+#include <optional>
+#include <vector>
 
 namespace fin::indicators
 {

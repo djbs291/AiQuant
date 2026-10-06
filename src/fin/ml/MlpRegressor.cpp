@@ -15,6 +15,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <memory>
+#include <unordered_map>
 
 #include "fin/ml/FeatureVector.hpp"
 #include "fin/ml/LinearModel.hpp"

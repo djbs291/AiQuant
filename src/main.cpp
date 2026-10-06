@@ -14,6 +14,7 @@
 #include <memory>
 #include <sstream>
 #include <unordered_map>
+#include <utility>
 
 #include "fin/io/Pipeline.hpp"
 #include "fin/backtest/Backtester.hpp"

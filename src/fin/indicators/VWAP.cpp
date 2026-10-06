@@ -1,6 +1,8 @@
 #include "fin/indicators/VWAP.hpp"
 #include <limits>
 #include <algorithm>
+#include <optional>
+#include <vector>
 
 namespace fin::indicators
 {
