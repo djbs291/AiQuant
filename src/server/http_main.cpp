@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cerrno>
 #include <charconv>
+#include <cstdlib>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -1116,6 +1117,7 @@ namespace
                   << "  --api-key          an accepted API key (repeatable); if any is set, every request but\n"
                   << "                     GET /health needs one in X-API-Key or Authorization: Bearer (default: off)\n"
                   << "  --api-keys-file    file of accepted keys, one per line (# comments and blank lines ignored)\n"
+                  << "                     (keys may also come from the AIQUANT_API_KEYS env var, comma-separated)\n"
                   << "  --rate-limit       requests allowed per key, or per client address when auth is off, in\n"
                   << "                     each --rate-window; 0 disables limiting (default: 0)\n"
                   << "  --rate-window      length of the rate-limit window in seconds (default: 60)\n";
@@ -1220,6 +1222,30 @@ namespace
         }
         return true;
     }
+
+    // Adds any keys from the AIQUANT_API_KEYS environment variable (comma-separated) to the set,
+    // alongside those from --api-key / --api-keys-file. Platforms like Render inject secrets as
+    // environment variables, so this is how the key is supplied in a deployment without putting
+    // it on the command line where it would show up in process listings and config.
+    void load_env_api_keys(Options &opts)
+    {
+        const char *raw = std::getenv("AIQUANT_API_KEYS");
+        if (raw == nullptr)
+            return;
+        std::string_view keys(raw);
+        std::size_t start = 0;
+        while (start <= keys.size())
+        {
+            const std::size_t comma = keys.find(',', start);
+            const std::size_t end = (comma == std::string_view::npos) ? keys.size() : comma;
+            const std::string key = trim(std::string(keys.substr(start, end - start)));
+            if (!key.empty())
+                opts.api_keys.insert(key);
+            if (comma == std::string_view::npos)
+                break;
+            start = comma + 1;
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -1230,6 +1256,7 @@ int main(int argc, char **argv)
         print_usage();
         return 2;
     }
+    load_env_api_keys(opts);
 
     std::error_code ec;
     if (!std::filesystem::is_directory(opts.root, ec))

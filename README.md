@@ -225,7 +225,7 @@ The service listens on **`127.0.0.1` by default**. It has **no TLS** — termina
 curl -X POST http://localhost:8080/predict -H "X-API-Key: $MY_KEY" -d '{"features":{"close":100,"rsi":55}}'
 ```
 
-With one or more `--api-key` set (or `--api-keys-file`, one key per line), every request except `GET /health` must present a known key in `X-API-Key` or `Authorization: Bearer`; missing or wrong is `401`. `--rate-limit N` caps requests to `N` per `--rate-window` seconds (default 60) **per key**, or per client address when auth is off; over quota is `429` with `Retry-After`. `GET /health` is exempt from both so a load balancer can poll it.
+With one or more `--api-key` set (or `--api-keys-file`, one key per line, or the `AIQUANT_API_KEYS` environment variable, comma-separated — the usual way a host injects a secret), every request except `GET /health` must present a known key in `X-API-Key` or `Authorization: Bearer`; missing or wrong is `401`. `--rate-limit N` caps requests to `N` per `--rate-window` seconds (default 60) **per key**, or per client address when auth is off; over quota is `429` with `Retry-After`. `GET /health` is exempt from both so a load balancer can poll it.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
