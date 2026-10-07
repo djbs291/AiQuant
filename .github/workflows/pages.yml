@@ -31,8 +31,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # enablement: true turns Pages on for the repo if it is not already, so no manual
+      # Settings -> Pages step is needed (the workflow's pages:write permission covers it).
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload the landing as the Pages artifact
         uses: actions/upload-pages-artifact@v3
