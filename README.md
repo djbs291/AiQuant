@@ -4,6 +4,8 @@ AiQuant is a C++20 engine for quantitative-trading research. It reads tick data 
 
 The whole pipeline is described by a single INI "scenario" and can be driven three ways: the `aiquant` CLI, the `aiquant_http` microservice, and the `aiquant_api` Python module.
 
+**Live:** a hosted instance of the HTTP API runs at `https://aiquant-http-ukqi.onrender.com` (try `GET /health`), and the landing page is published from [`site/`](site/) to GitHub Pages at <https://djbs291.github.io/AiQuant/>.
+
 - Architecture and roadmap: `docs/CppFinancialAIEngine.md`, per-layer designs in `docs/*LayerDesign_*.md`
 - Current state, known issues and priorities: `docs/ProjectStatus.md`
 - Scenario INI grammar: `docs/ScenarioConfig.md`

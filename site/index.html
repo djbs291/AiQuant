@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AiQuant — quant research &amp; backtesting API</title>
+  <meta name="description" content="A fast C++ engine for algorithmic-trading research: ticks to candles, technical indicators, a trained model, and a rule-based backtest — over a simple HTTP API." />
+  <style>
+    :root {
+      --bg: #ffffff;
+      --surface: #f6f7f9;
+      --border: #e3e6ea;
+      --text: #1a1d21;
+      --muted: #5b636d;
+      --accent: #2563eb;
+      --accent-soft: #eaf0fe;
+      --code-bg: #0f172a;
+      --code-text: #e2e8f0;
+      --warn-bg: #fff8e6;
+      --warn-border: #e9c86a;
+      --warn-text: #6b5411;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --surface: #161b22;
+        --border: #272e38;
+        --text: #e6edf3;
+        --muted: #9aa5b1;
+        --accent: #6ea8fe;
+        --accent-soft: #15233f;
+        --code-bg: #010409;
+        --code-text: #e2e8f0;
+        --warn-bg: #2a2410;
+        --warn-border: #6b5411;
+        --warn-text: #e8d48a;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px; }
+    header {
+      padding: 72px 0 40px;
+      border-bottom: 1px solid var(--border);
+    }
+    .eyebrow {
+      font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--accent); font-weight: 600; margin: 0 0 12px;
+    }
+    h1 { font-size: 2.6rem; line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
+    .lede { font-size: 1.2rem; color: var(--muted); margin: 0 0 28px; max-width: 42ch; }
+    .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn {
+      display: inline-block; padding: 11px 20px; border-radius: 8px;
+      font-weight: 600; text-decoration: none; font-size: 0.95rem; border: 1px solid transparent;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+    section { padding: 44px 0; border-bottom: 1px solid var(--border); }
+    h2 { font-size: 1.5rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+    h2 + .sub { color: var(--muted); margin: 0 0 22px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 18px 20px;
+    }
+    .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+    .card p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+    pre {
+      background: var(--code-bg); color: var(--code-text); border-radius: 10px;
+      padding: 18px 20px; overflow-x: auto; font-size: 0.86rem; line-height: 1.5;
+      font-family: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    }
+    pre .c { color: #7d8da1; }      /* comment */
+    pre .k { color: #7ee787; }      /* literal / value */
+    code.inline {
+      background: var(--accent-soft); color: var(--accent); padding: 1px 6px;
+      border-radius: 5px; font-size: 0.88em;
+      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    td code { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 0.86em; }
+    .method { color: var(--accent); font-weight: 600; }
+    .disclaimer {
+      background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-text);
+      border-radius: 10px; padding: 20px 22px; font-size: 0.92rem;
+    }
+    .disclaimer strong { color: var(--warn-text); }
+    footer { padding: 36px 0 60px; color: var(--muted); font-size: 0.88rem; }
+    footer a { color: var(--accent); }
+    .pill {
+      display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+      text-transform: uppercase; background: var(--accent-soft); color: var(--accent);
+      padding: 3px 9px; border-radius: 999px; vertical-align: middle; margin-left: 8px;
+    }
+    @media (max-width: 560px) { h1 { font-size: 2rem; } header { padding: 48px 0 32px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Quantitative research engine</p>
+      <h1>AiQuant <span class="pill">MVP</span></h1>
+      <p class="lede">A fast C++ engine for algorithmic-trading research — exposed as a simple HTTP API. Send price data, get candles, indicators, a trained model and a backtest back.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#quickstart">Quickstart</a>
+        <a class="btn btn-ghost" href="https://github.com/djbs291/AiQuant">View on GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="wrap">
+      <h2>What it does</h2>
+      <p class="sub">The whole pipeline, from raw ticks to a backtested signal, behind one request.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Ticks → candles</h3>
+          <p>Resamples raw tick data into OHLCV candles at S1–H1 timeframes.</p>
+        </div>
+        <div class="card">
+          <h3>Indicators</h3>
+          <p>EMA, RSI, MACD, Bollinger, ATR, ADX, Stochastic, VWAP, Z-Score, Momentum — validated against TA-Lib.</p>
+        </div>
+        <div class="card">
+          <h3>Models</h3>
+          <p>Ridge, online SGD, or an MLP predict the next close-to-close move. Trained on your data, per request.</p>
+        </div>
+        <div class="card">
+          <h3>Backtest</h3>
+          <p>A rule + model signal engine, reported <em>out of sample</em> with the in-sample stretch beside it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="wrap">
+      <h2>Quickstart</h2>
+      <p class="sub">Every endpoint but <code class="inline">/health</code> needs your API key in an <code class="inline">X-API-Key</code> header.</p>
+      <pre><span class="c"># Is the service up? (no key needed)</span>
+curl https://aiquant-http-ukqi.onrender.com/health
+<span class="k">{"status": "ok"}</span>
+
+<span class="c"># Back-test your own data inline: send a tick CSV + a scenario config.</span>
+curl -X POST https://aiquant-http-ukqi.onrender.com/run-inline \
+  -H "X-API-Key: <span class="k">YOUR_KEY</span>" \
+  -d '{"ticks_csv": "Timestamp,symbol,price,volume\n...", "config": "tf = M5\nmodel = ridge"}'
+
+<span class="c"># Evaluate the signal engine on one snapshot.</span>
+curl -X POST https://aiquant-http-ukqi.onrender.com/signal \
+  -H "X-API-Key: <span class="k">YOUR_KEY</span>" \
+  -d '{"close":100,"rsi":20,"ema_fast":11,"ema_slow":10,"prediction":0.5}'
+<span class="k">{"signal": "Buy", "score": 2.5, "reason": "RSI&lt;=buy EMA+ ML+ "}</span></pre>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Endpoints</h2>
+      <p class="sub">JSON in, JSON out. Full reference in the <a href="https://github.com/djbs291/AiQuant#readme">README</a>.</p>
+      <table>
+        <tr><th>Method &amp; path</th><th>What it does</th></tr>
+        <tr><td><span class="method">GET</span> <code>/health</code></td><td>Liveness check. Open, no key.</td></tr>
+        <tr><td><span class="method">POST</span> <code>/run-inline</code></td><td>Full pipeline on data you send in the request: candles, indicators, model, out-of-sample backtest.</td></tr>
+        <tr><td><span class="method">POST</span> <code>/predict</code></td><td>Apply a trained model to one set of feature values.</td></tr>
+        <tr><td><span class="method">POST</span> <code>/signal</code></td><td>Run the rule + model signal engine on one snapshot.</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="disclaimer">
+        <strong>Important — this is a research tool, not financial advice.</strong>
+        AiQuant computes indicators and runs backtests on the data you provide. It does not
+        provide investment advice or recommendations, and nothing it returns is a solicitation to
+        trade. Backtested results are hypothetical, depend entirely on the inputs and settings you
+        choose, and are <strong>not indicative of future performance</strong>. There is no promise
+        or guarantee of profit. Trading carries risk of loss. Use it for research and education,
+        and do your own due diligence.
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      AiQuant is an open-source C++20 engine. Source and docs on
+      <a href="https://github.com/djbs291/AiQuant">GitHub</a>.
+      Early-stage MVP — the API may change.
+    </div>
+  </footer>
+</body>
+</html>
