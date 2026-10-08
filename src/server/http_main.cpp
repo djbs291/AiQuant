@@ -58,6 +58,11 @@ namespace
         // Zero means no limiting, the default.
         std::size_t rate_limit = 0;
         int rate_window_seconds = 60;
+        // Origins allowed to call the API from a browser (CORS). Empty means no CORS headers are
+        // sent, the default, so same-origin and non-browser clients are unaffected. A "*" entry
+        // allows any origin; otherwise a request's Origin is echoed only when it is listed. The
+        // API key, not the origin, is the gate -- CORS just lets a browser read the response.
+        std::vector<std::string> cors_origins;
     };
 
     constexpr std::size_t kMaxHeaderBytes = 16 * 1024;
@@ -143,6 +148,9 @@ namespace
         // The credential presented, from `X-API-Key` or a `Authorization: Bearer <key>` header.
         // Empty when neither was sent.
         std::string api_key;
+        // The `Origin` header, when the request is a browser cross-origin one. Used only to
+        // decide the CORS response; never echoed into a header without passing the allowlist.
+        std::string origin;
     };
 
     enum class ReadStatus
@@ -217,6 +225,10 @@ namespace
                 else
                     req.api_key = value;
             }
+            else if (strcasecmp(name.c_str(), "Origin") == 0)
+            {
+                req.origin = value;
+            }
         }
 
         if (content_length > max_body)
@@ -237,6 +249,13 @@ namespace
         return ReadStatus::Ok;
     }
 
+    // The CORS Access-Control-Allow-Origin value for the request being served on this thread, or
+    // empty for none. handle_request sets it once (each request runs on its own thread), and
+    // send_response reads it, so the ~thirty response call sites need no change. The value is
+    // always a configured allowlist entry or "*" -- never raw request data -- so it cannot carry
+    // a CRLF, which keeps response splitting off the table.
+    thread_local std::string tls_cors_origin;
+
     // content_type is defaulted so the thirty JSON call sites stay as they are; only the
     // static-file path passes something else.
     void send_response(int client_fd, int status, std::string_view status_text, const std::string &payload,
@@ -249,8 +268,11 @@ namespace
         std::ostringstream out;
         out << "HTTP/1.1 " << status << ' ' << status_text << "\r\n"
             << "Content-Type: " << content_type << "\r\n"
-            << "Content-Length: " << payload.size() << "\r\n"
-            << extra_headers
+            << "Content-Length: " << payload.size() << "\r\n";
+        if (!tls_cors_origin.empty())
+            out << "Access-Control-Allow-Origin: " << tls_cors_origin << "\r\n"
+                << "Vary: Origin\r\n";
+        out << extra_headers
             << "Connection: close\r\n\r\n"
             << payload;
         const auto response = out.str();
@@ -928,6 +950,25 @@ namespace
         send_response(client, 200, "OK", fin::app::scenario_result_to_json(display, result));
     }
 
+    // The Access-Control-Allow-Origin value for a request from `origin`, given the configured
+    // allowlist: "*" when the allowlist contains "*", the matching configured origin when
+    // `origin` is listed, or "" (no CORS) otherwise. It returns the configured string rather than
+    // the raw request value, so only vetted text ever reaches the header.
+    std::string resolve_cors_origin(const Options &opts, const std::string &origin)
+    {
+        if (opts.cors_origins.empty())
+            return {};
+        for (const auto &allowed : opts.cors_origins)
+            if (allowed == "*")
+                return "*";
+        if (origin.empty())
+            return {};
+        for (const auto &allowed : opts.cors_origins)
+            if (allowed == origin)
+                return allowed;
+        return {};
+    }
+
     void handle_request(const fin::api::ScenarioService &service,
                         const fin::api::PredictService &predictor,
                         const Options &opts, const std::string &client_ip,
@@ -949,6 +990,25 @@ namespace
             return;
         case ReadStatus::Ok:
             break;
+        }
+
+        // Resolve CORS once for this request (its own thread): send_response then stamps the
+        // Access-Control-Allow-Origin on every reply below. Done before the gates so even a 401
+        // or 429 carries it and the browser can read the status.
+        tls_cors_origin = resolve_cors_origin(opts, req.origin);
+
+        // CORS preflight: browsers send OPTIONS before a request with a custom header (the API
+        // key) or a JSON content type. Answer it here -- before auth, since a preflight carries
+        // no key -- but only when CORS is configured; otherwise OPTIONS falls through to 405 as
+        // it always did. The Allow-Origin comes from tls_cors_origin (empty, hence absent, when
+        // the origin is not allowed, which the browser then rejects -- the correct outcome).
+        if (req.method == "OPTIONS" && !opts.cors_origins.empty())
+        {
+            send_response(client, 204, "No Content", "", "text/plain",
+                          "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+                          "Access-Control-Allow-Headers: Content-Type, X-API-Key, Authorization\r\n"
+                          "Access-Control-Max-Age: 86400\r\n");
+            return;
         }
 
         if (req.method == "GET" && req.path == "/health")
@@ -1123,7 +1183,9 @@ namespace
                   << "                     (keys may also come from the AIQUANT_API_KEYS env var, comma-separated)\n"
                   << "  --rate-limit       requests allowed per key, or per client address when auth is off, in\n"
                   << "                     each --rate-window; 0 disables limiting (default: 0)\n"
-                  << "  --rate-window      length of the rate-limit window in seconds (default: 60)\n";
+                  << "  --rate-window      length of the rate-limit window in seconds (default: 60)\n"
+                  << "  --cors-origin      a browser origin allowed to call the API (repeatable; \"*\" allows any).\n"
+                  << "                     Off unless set. Also read from AIQUANT_CORS_ORIGINS (comma-separated)\n";
     }
 
     bool parse_args(int argc, char **argv, Options &opts)
@@ -1211,6 +1273,17 @@ namespace
                         return false;
                     }
                 }
+                else if (arg == "--cors-origin")
+                {
+                    // Repeatable: each one adds an allowed browser origin. "*" allows any.
+                    const std::string origin = trim(value);
+                    if (origin.empty())
+                    {
+                        std::cerr << "Empty value for --cors-origin\n";
+                        return false;
+                    }
+                    opts.cors_origins.push_back(origin);
+                }
                 else
                 {
                     std::cerr << "Unknown option " << arg << "\n";
@@ -1249,6 +1322,28 @@ namespace
             start = comma + 1;
         }
     }
+
+    // Adds any origins from the AIQUANT_CORS_ORIGINS environment variable (comma-separated) to the
+    // allowlist, alongside any --cors-origin. This is how a host like Render supplies them.
+    void load_env_cors_origins(Options &opts)
+    {
+        const char *raw = std::getenv("AIQUANT_CORS_ORIGINS");
+        if (raw == nullptr)
+            return;
+        std::string_view origins(raw);
+        std::size_t start = 0;
+        while (start <= origins.size())
+        {
+            const std::size_t comma = origins.find(',', start);
+            const std::size_t end = (comma == std::string_view::npos) ? origins.size() : comma;
+            const std::string origin = trim(std::string(origins.substr(start, end - start)));
+            if (!origin.empty())
+                opts.cors_origins.push_back(origin);
+            if (comma == std::string_view::npos)
+                break;
+            start = comma + 1;
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -1260,6 +1355,7 @@ int main(int argc, char **argv)
         return 2;
     }
     load_env_api_keys(opts);
+    load_env_cors_origins(opts);
 
     std::error_code ec;
     if (!std::filesystem::is_directory(opts.root, ec))
@@ -1345,6 +1441,11 @@ int main(int argc, char **argv)
                       : (std::to_string(opts.rate_limit) + " req / " +
                          std::to_string(opts.rate_window_seconds) + "s per " +
                          (opts.api_keys.empty() ? "client" : "key")))
+              << "\n"
+              << "  CORS: "
+              << (opts.cors_origins.empty()
+                      ? std::string("off")
+                      : (std::to_string(opts.cors_origins.size()) + " allowed origin(s)"))
               << std::endl;
 
     if (opts.bind != "127.0.0.1" && opts.api_keys.empty())

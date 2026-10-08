@@ -72,6 +72,19 @@ def get_with_headers(port, path):
         conn.close()
 
 
+def request_with_headers(port, method, path, body=None, headers=None):
+    """Any method, returning (status, response-headers dict), for CORS checks."""
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+    try:
+        conn.request(method, path, body=body, headers=headers or {})
+        response = conn.getresponse()
+        hdrs = {k.lower(): v for k, v in response.getheaders()}
+        response.read()
+        return response.status, hdrs
+    finally:
+        conn.close()
+
+
 def check(label, got, expected):
     assert got == expected, f"{label}: expected {expected}, got {got}"
     print(f"  ok  {label} -> {got}")
@@ -385,6 +398,71 @@ def check_run_inline(tmp):
         stop_server(proc)
 
 
+def check_cors(tmp):
+    """--cors-origin adds CORS headers and answers the OPTIONS preflight; off by default."""
+    root = os.path.join(tmp, "scenarios")
+    allowed = "https://example.github.io"
+
+    port, proc = start_server(["--root", root, "--cors-origin", allowed])
+    try:
+        # Preflight from the allowed origin: 204 with the allow headers.
+        status, h = request_with_headers(port, "OPTIONS", "/signal",
+                                         headers={"Origin": allowed,
+                                                  "Access-Control-Request-Method": "POST"})
+        check("OPTIONS preflight (allowed origin)", status, 204)
+        assert h.get("access-control-allow-origin") == allowed, h
+        assert "POST" in h.get("access-control-allow-methods", ""), h
+        assert "x-api-key" in h.get("access-control-allow-headers", "").lower(), h
+
+        # A normal response to the allowed origin carries Allow-Origin.
+        status, h = request_with_headers(port, "POST", "/signal",
+                                         body='{"close":100,"rsi":20,"prediction":0.5}',
+                                         headers={"Origin": allowed})
+        check("POST from allowed origin", status, 200)
+        assert h.get("access-control-allow-origin") == allowed, h
+
+        # An origin not on the allowlist gets no CORS header (the browser then blocks it).
+        status, h = request_with_headers(port, "POST", "/signal",
+                                         body='{"close":100,"rsi":20,"prediction":0.5}',
+                                         headers={"Origin": "https://evil.example"})
+        check("POST from disallowed origin (no CORS header)",
+              "access-control-allow-origin" in h, False)
+        assert status == 200, status  # the request still runs; only the CORS header is withheld
+    finally:
+        stop_server(proc)
+
+    # "*" allows any origin.
+    port, proc = start_server(["--root", root, "--cors-origin", "*"])
+    try:
+        status, h = request_with_headers(port, "POST", "/signal",
+                                         body='{"close":100,"rsi":20,"prediction":0.5}',
+                                         headers={"Origin": "https://anything.example"})
+        check("POST with --cors-origin '*'", h.get("access-control-allow-origin"), "*")
+    finally:
+        stop_server(proc)
+
+    # Origins can also come from AIQUANT_CORS_ORIGINS.
+    port, proc = start_server(["--root", root], env={"AIQUANT_CORS_ORIGINS": allowed})
+    try:
+        status, h = request_with_headers(port, "POST", "/signal",
+                                         body='{"close":100,"rsi":20,"prediction":0.5}',
+                                         headers={"Origin": allowed})
+        check("POST with origin from AIQUANT_CORS_ORIGINS", h.get("access-control-allow-origin"), allowed)
+    finally:
+        stop_server(proc)
+
+    # Off by default: no CORS header, and OPTIONS falls through to 405.
+    port, proc = start_server(["--root", root])
+    try:
+        status, h = request_with_headers(port, "POST", "/signal",
+                                         body='{"close":100,"rsi":20,"prediction":0.5}',
+                                         headers={"Origin": allowed})
+        check("CORS off by default (no header)", "access-control-allow-origin" in h, False)
+        check("OPTIONS with CORS off -> 405", request(port, "OPTIONS", "/signal")[0], 405)
+    finally:
+        stop_server(proc)
+
+
 def check_bind(tmp):
     """Loopback by default; --bind takes an IPv4 address and refuses anything else."""
     port, proc = start_server(["--root", tmp, "--bind", "127.0.0.1"])
@@ -583,6 +661,7 @@ def main():
         check_bind(tmp)
         check_auth(tmp)
         check_rate_limit(tmp)
+        check_cors(tmp)
 
     print("aiquant_http OK")
     return 0
