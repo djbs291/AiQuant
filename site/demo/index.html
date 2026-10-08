@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AiQuant Playground</title>
+  <meta name="description" content="Interactive playground for the AiQuant engine: run a backtest on your own data, evaluate the signal engine, and apply a model — all against the live HTTP API." />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1>AiQuant <span class="tag">Playground</span></h1>
+      <span id="status" class="status">connecting…</span>
+    </div>
+    <p class="hint">
+      A client for the AiQuant HTTP API. Set your endpoint and key below, then experiment.
+      <a href="../">About</a> · <a href="https://github.com/djbs291/AiQuant">GitHub</a>
+    </p>
+
+    <div class="settings">
+      <label>API base URL
+        <input id="base-url" type="text" placeholder="https://aiquant-http-ukqi.onrender.com" />
+      </label>
+      <label>API key (<code>X-API-Key</code>)
+        <input id="api-key" type="password" placeholder="your key" autocomplete="off" />
+      </label>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="backtest">Backtest</button>
+    <button class="tab" data-tab="signal">Signal</button>
+    <button class="tab" data-tab="predict">Predict</button>
+  </nav>
+
+  <!-- ============ BACKTEST ============ -->
+  <section id="backtest" class="tabpanel active">
+    <div class="split">
+      <div class="panel">
+        <h2>Data</h2>
+        <p class="hint">Tick CSV: <code>Timestamp,symbol,price,volume</code>. Need data? Generate some.</p>
+        <div class="row">
+          <button id="gen-data" class="secondary" type="button">Generate synthetic</button>
+          <button id="load-sample" class="secondary" type="button">Load sample</button>
+          <label class="file-btn secondary">Upload CSV<input id="file" type="file" accept=".csv,text/csv" hidden /></label>
+        </div>
+        <textarea id="ticks" rows="8" placeholder="Timestamp,symbol,price,volume&#10;1693492800000,ABC,100.0,1&#10;…"></textarea>
+        <p id="ticks-meta" class="hint"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Scenario</h2>
+        <div class="grid">
+          <label>Timeframe
+            <select id="tf"><option>S1</option><option>S5</option><option selected>M1</option><option>M5</option><option>H1</option></select>
+          </label>
+          <label>Model
+            <select id="model"><option value="ridge" selected>ridge</option><option value="sgd">sgd</option><option value="mlp">mlp</option></select>
+          </label>
+          <label>Train ratio<input id="train-ratio" type="number" step="0.05" min="0.1" max="0.95" value="0.7" /></label>
+          <label>Model weight<input id="model-weight" type="number" step="0.1" min="0" value="0.5" /></label>
+          <label>Cash<input id="cash" type="number" step="any" placeholder="default" /></label>
+          <label>Qty<input id="qty" type="number" step="any" placeholder="default" /></label>
+          <label>Fee<input id="fee" type="number" step="any" placeholder="default" /></label>
+          <label>Preview rows<input id="preview" type="number" step="10" min="0" value="200" /></label>
+        </div>
+        <label>Features (comma-separated, blank = default six)
+          <input id="features" type="text" placeholder="close,ema_fast,rsi,atr" />
+        </label>
+        <button id="run-backtest" type="button">Run backtest</button>
+      </div>
+    </div>
+    <div id="backtest-out" class="out">Results will appear here.</div>
+  </section>
+
+  <!-- ============ SIGNAL ============ -->
+  <section id="signal" class="tabpanel">
+    <div class="panel">
+      <h2>Signal engine</h2>
+      <p class="hint">Evaluate one snapshot. Give a <code>prediction</code> directly, or leave it blank for rules only.</p>
+      <div class="grid">
+        <label>Close<input id="sig-close" type="number" step="any" value="100" /></label>
+        <label>RSI<input id="sig-rsi" type="number" step="any" value="20" /></label>
+        <label>EMA fast<input id="sig-ema-fast" type="number" step="any" value="11" /></label>
+        <label>EMA slow<input id="sig-ema-slow" type="number" step="any" value="10" /></label>
+        <label>Prediction<input id="sig-prediction" type="number" step="any" value="0.5" /></label>
+        <label>Model weight<input id="sig-model-weight" type="number" step="0.1" min="0" placeholder="0.5" /></label>
+        <label>RSI buy ≤<input id="sig-rsi-buy" type="number" step="any" placeholder="30" /></label>
+        <label>RSI sell ≥<input id="sig-rsi-sell" type="number" step="any" placeholder="70" /></label>
+      </div>
+      <label class="check"><input id="sig-xover" type="checkbox" checked /> use EMA crossover</label>
+      <button id="run-signal" type="button">Evaluate</button>
+      <div id="signal-out" class="out">Verdict will appear here.</div>
+    </div>
+  </section>
+
+  <!-- ============ PREDICT ============ -->
+  <section id="predict" class="tabpanel">
+    <div class="panel">
+      <h2>Predict</h2>
+      <p class="hint">Apply a trained model (a path under the server's <code>--root</code>) to feature values.</p>
+      <label>Model path (optional, uses the server default if blank)
+        <input id="predict-model" type="text" placeholder="model.csv" />
+      </label>
+      <div id="feature-rows"></div>
+      <button id="add-feature" class="secondary" type="button">Add feature</button>
+      <button id="run-predict" type="button">Predict</button>
+      <div id="predict-out" class="out">Prediction will appear here.</div>
+    </div>
+  </section>
+
+  <footer>
+    <p class="hint">
+      Research/backtesting tool — <strong>not investment advice</strong>, and backtests are not
+      indicative of future performance. Your key is stored only in this browser.
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
