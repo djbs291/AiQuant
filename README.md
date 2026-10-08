@@ -229,6 +229,12 @@ curl -X POST http://localhost:8080/predict -H "X-API-Key: $MY_KEY" -d '{"feature
 
 With one or more `--api-key` set (or `--api-keys-file`, one key per line, or the `AIQUANT_API_KEYS` environment variable, comma-separated — the usual way a host injects a secret), every request except `GET /health` must present a known key in `X-API-Key` or `Authorization: Bearer`; missing or wrong is `401`. `--rate-limit N` caps requests to `N` per `--rate-window` seconds (default 60) **per key**, or per client address when auth is off; over quota is `429` with `Retry-After`. `GET /health` is exempt from both so a load balancer can poll it.
 
+**CORS** is off by default (same-origin and non-browser clients are unaffected). To let a browser app on another origin call the API, list the allowed origins with `--cors-origin` (repeatable, or the `AIQUANT_CORS_ORIGINS` env var, comma-separated; `*` allows any). The service then answers the preflight `OPTIONS` and stamps `Access-Control-Allow-Origin` on allowed responses. The API key, not the origin, is the gate — CORS only lets the browser *read* the response.
+
+```bash
+./build/aiquant_http --root scenarios --api-key "$MY_KEY" --cors-origin https://djbs291.github.io
+```
+
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--port` | 8080 | TCP port |
@@ -242,6 +248,7 @@ With one or more `--api-key` set (or `--api-keys-file`, one key per line, or the
 | `--api-keys-file` | none | file of accepted keys, one per line (`#` comments and blank lines ignored) |
 | `--rate-limit` | 0 (off) | requests allowed per key (or per client address with auth off) in each window |
 | `--rate-window` | 60 | length of the rate-limit window, in seconds |
+| `--cors-origin` | none (off) | a browser origin allowed to call the API (repeatable; `*` allows any); also from `AIQUANT_CORS_ORIGINS` |
 
 Status codes: `200` on success, `400` for a malformed request or unparsable INI, `401` for a missing or invalid API key, `403` for a path outside `--root`, `404` for a missing file or unknown endpoint, `405` for a method other than POST (except `GET /health` and, with `--static`, GET of a served file), `413` for an oversized body, `422` for a valid scenario the engine cannot run (too few candles, say), `429` when the rate limit is exceeded, `503` when the concurrency limit is reached, and `500` otherwise.
 

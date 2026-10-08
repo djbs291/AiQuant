@@ -13,6 +13,10 @@ Whatever you pick, the invariants are the same:
 - Set `AIQUANT_API_KEYS` to one or more comma-separated secrets; every request but `/health`
   then needs one in `X-API-Key` or `Authorization: Bearer`.
 - Generate a key with `openssl rand -hex 24`. Keep it out of git — set it in the host's secrets.
+- To let a **browser app on another origin** (e.g. the demo on GitHub Pages) call the API, set
+  `AIQUANT_CORS_ORIGINS` to the allowed origin(s), comma-separated — for the demo,
+  `https://djbs291.github.io`. Without it, cross-origin browser requests are blocked (CORS off by
+  default). Non-browser clients (curl, server-to-server) never need it.
 
 ---
 
